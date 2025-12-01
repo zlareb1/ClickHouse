@@ -24,7 +24,8 @@ def _apply_gate(gate, nodes, leader, ctx, summary):
 def _snapshot_and_sink(nodes, stage, scenario_id, topo, run_meta, sink_url, run_id=""):
     if not sink_url:
         return
-    fourlw_rows=[]; prom_rows=[]; chm_rows=[]; cham_rows=[]; tr_rows=[]; prom_parsed_rows=[]
+    minimal = os.environ.get("KEEPER_SINK_MINIMAL", "").strip().lower() in ("1","true","yes","on")
+    fourlw_rows=[]; prom_rows=[]; chm_rows=[]; cham_rows=[]; tr_rows=[]; prom_parsed_rows=[]; metrics_ts_rows=[]
     # For fail stage, only snapshot leader to reduce volume
     snap_nodes = nodes
     if stage == "fail":
@@ -50,6 +51,27 @@ def _snapshot_and_sink(nodes, stage, scenario_id, topo, run_meta, sink_url, run_
                 "lgif_json": json.dumps(l),
                 "srvr_text": s,
             })
+            try:
+                for _k, _v in (m or {}).items():
+                    try:
+                        _val = float(_v)
+                    except Exception:
+                        continue
+                    metrics_ts_rows.append({
+                        "run_id": run_id,
+                        "commit_sha": run_meta.get("commit_sha","local"),
+                        "backend": run_meta.get("backend","default"),
+                        "scenario": scenario_id,
+                        "topology": topo,
+                        "node": n.name,
+                        "stage": stage,
+                        "source": "mntr",
+                        "name": str(_k),
+                        "value": _val,
+                        "labels_json": "{}",
+                    })
+            except Exception:
+                pass
         except Exception:
             pass
         try:
@@ -66,6 +88,13 @@ def _snapshot_and_sink(nodes, stage, scenario_id, topo, run_meta, sink_url, run_
             })
             try:
                 for r in parse_prometheus_text(p):
+                    name = r.get("name","")
+                    val = 0.0
+                    try:
+                        val = float(r.get("value", 0.0))
+                    except Exception:
+                        val = 0.0
+                    lj = r.get("labels_json", "{}")
                     prom_parsed_rows.append({
                         "run_id": run_id,
                         "commit_sha": run_meta.get("commit_sha","local"),
@@ -74,9 +103,22 @@ def _snapshot_and_sink(nodes, stage, scenario_id, topo, run_meta, sink_url, run_
                         "topology": topo,
                         "node": n.name,
                         "stage": stage,
-                        "name": r.get("name",""),
-                        "value": float(r.get("value", 0.0)),
-                        "labels_json": r.get("labels_json", "{}"),
+                        "name": name,
+                        "value": val,
+                        "labels_json": lj,
+                    })
+                    metrics_ts_rows.append({
+                        "run_id": run_id,
+                        "commit_sha": run_meta.get("commit_sha","local"),
+                        "backend": run_meta.get("backend","default"),
+                        "scenario": scenario_id,
+                        "topology": topo,
+                        "node": n.name,
+                        "stage": stage,
+                        "source": "prom",
+                        "name": name,
+                        "value": val,
+                        "labels_json": lj,
                     })
             except Exception:
                 pass
@@ -84,6 +126,12 @@ def _snapshot_and_sink(nodes, stage, scenario_id, topo, run_meta, sink_url, run_
             pass
         try:
             for r in ch_metrics(n):
+                nm = r.get("name","")
+                val = 0.0
+                try:
+                    val = float(r.get("value",0))
+                except Exception:
+                    val = 0.0
                 chm_rows.append({
                     "run_id": run_id,
                     "commit_sha": run_meta.get("commit_sha","local"),
@@ -92,13 +140,32 @@ def _snapshot_and_sink(nodes, stage, scenario_id, topo, run_meta, sink_url, run_
                     "topology": topo,
                     "node": n.name,
                     "stage": stage,
-                    "name": r.get("name",""),
-                    "value": float(r.get("value",0)),
+                    "name": nm,
+                    "value": val,
+                })
+                metrics_ts_rows.append({
+                    "run_id": run_id,
+                    "commit_sha": run_meta.get("commit_sha","local"),
+                    "backend": run_meta.get("backend","default"),
+                    "scenario": scenario_id,
+                    "topology": topo,
+                    "node": n.name,
+                    "stage": stage,
+                    "source": "ch_metrics",
+                    "name": nm,
+                    "value": val,
+                    "labels_json": "{}",
                 })
         except Exception:
             pass
         try:
             for r in ch_async_metrics(n):
+                nm = r.get("name","")
+                val = 0.0
+                try:
+                    val = float(r.get("value",0))
+                except Exception:
+                    val = 0.0
                 cham_rows.append({
                     "run_id": run_id,
                     "commit_sha": run_meta.get("commit_sha","local"),
@@ -107,8 +174,21 @@ def _snapshot_and_sink(nodes, stage, scenario_id, topo, run_meta, sink_url, run_
                     "topology": topo,
                     "node": n.name,
                     "stage": stage,
-                    "name": r.get("name",""),
-                    "value": float(r.get("value",0)),
+                    "name": nm,
+                    "value": val,
+                })
+                metrics_ts_rows.append({
+                    "run_id": run_id,
+                    "commit_sha": run_meta.get("commit_sha","local"),
+                    "backend": run_meta.get("backend","default"),
+                    "scenario": scenario_id,
+                    "topology": topo,
+                    "node": n.name,
+                    "stage": stage,
+                    "source": "ch_async_metrics",
+                    "name": nm,
+                    "value": val,
+                    "labels_json": "{}",
                 })
         except Exception:
             pass
@@ -127,18 +207,21 @@ def _snapshot_and_sink(nodes, stage, scenario_id, topo, run_meta, sink_url, run_
                 })
         except Exception:
             pass
-    if fourlw_rows:
-        sink_clickhouse(sink_url, "keeper_fourlw", fourlw_rows)
-    if prom_rows:
-        sink_clickhouse(sink_url, "keeper_prom", prom_rows)
-    if prom_parsed_rows:
-        sink_clickhouse(sink_url, "keeper_prom_parsed", prom_parsed_rows)
-    if chm_rows:
-        sink_clickhouse(sink_url, "keeper_ch_metrics", chm_rows)
-    if cham_rows:
-        sink_clickhouse(sink_url, "keeper_ch_async_metrics", cham_rows)
-    if tr_rows:
-        sink_clickhouse(sink_url, "keeper_trace_log", tr_rows)
+    if not minimal:
+        if fourlw_rows:
+            sink_clickhouse(sink_url, "keeper_fourlw", fourlw_rows)
+        if prom_rows:
+            sink_clickhouse(sink_url, "keeper_prom", prom_rows)
+        if prom_parsed_rows:
+            sink_clickhouse(sink_url, "keeper_prom_parsed", prom_parsed_rows)
+        if chm_rows:
+            sink_clickhouse(sink_url, "keeper_ch_metrics", chm_rows)
+        if cham_rows:
+            sink_clickhouse(sink_url, "keeper_ch_async_metrics", cham_rows)
+        if tr_rows:
+            sink_clickhouse(sink_url, "keeper_trace_log", tr_rows)
+    if metrics_ts_rows:
+        sink_clickhouse(sink_url, "keeper_metrics_ts", metrics_ts_rows)
 
 @pytest.mark.timeout(2400)
 def test_scenario(scenario, cluster_factory, request, run_meta):
@@ -278,15 +361,17 @@ def test_scenario(scenario, cluster_factory, request, run_meta):
             summary = ctx.get("bench_summary") or {}
         for gate in scenario.get("gates", []): _apply_gate(gate, nodes, leader, ctx, summary)
         if sink_url:
-            run_row={
-                "run_id": run_id,
-                "commit_sha": run_meta_eff.get("commit_sha","local"),
-                "backend": backend,
-                "scenario": scenario.get("id",""),
-                "topology": topo,
-                "summary_json": json.dumps(summary),
-            }
-            sink_clickhouse(sink_url, "keeper_bench_runs", [run_row])
+            run_summary = os.environ.get("KEEPER_SINK_RUN_SUMMARY", "").strip().lower() in ("1","true","yes","on")
+            if run_summary:
+                run_row={
+                    "run_id": run_id,
+                    "commit_sha": run_meta_eff.get("commit_sha","local"),
+                    "backend": backend,
+                    "scenario": scenario.get("id",""),
+                    "topology": topo,
+                    "summary_json": json.dumps(summary),
+                }
+                sink_clickhouse(sink_url, "keeper_bench_runs", [run_row])
         _snapshot_and_sink(nodes, "post", scenario.get("id",""), topo, run_meta_eff, sink_url, run_id)
         try:
             from ci.praktika.cidb import CIDB

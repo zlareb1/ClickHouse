@@ -95,3 +95,22 @@ CREATE TABLE IF NOT EXISTS keeper_prom_parsed
   value Float64,
   labels_json String
 ) ENGINE = MergeTree ORDER BY (run_id, node, stage, scenario, name) TTL ts + INTERVAL 30 DAY DELETE;
+
+-- Unified timeseries for Grafana-friendly queries
+CREATE TABLE IF NOT EXISTS keeper_metrics_ts
+(
+  ts DateTime DEFAULT now(),
+  run_id String,
+  commit_sha String,
+  backend String,
+  scenario String,
+  topology Int32,
+  node String,
+  stage String,
+  source LowCardinality(String),
+  name LowCardinality(String),
+  value Float64,
+  labels_json String DEFAULT '{}'
+) ENGINE = MergeTree
+ORDER BY (run_id, scenario, node, stage, name, ts)
+TTL ts + INTERVAL 30 DAY DELETE;
