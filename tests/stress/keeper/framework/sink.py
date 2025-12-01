@@ -49,6 +49,22 @@ def ensure_sink_schema(url):
             run_id String, commit_sha String, backend String, scenario String, topology Int32,
             summary_json String
         ) ENGINE=MergeTree ORDER BY (run_id, scenario) TTL ts + INTERVAL 30 DAY DELETE""",
+        f"""CREATE TABLE IF NOT EXISTS {db}.keeper_metrics_ts (
+            ts DateTime DEFAULT now(),
+            run_id String,
+            commit_sha String,
+            backend String,
+            scenario String,
+            topology Int32,
+            node String,
+            stage String,
+            source LowCardinality(String),
+            name LowCardinality(String),
+            value Float64,
+            labels_json String DEFAULT '{{}}'
+        ) ENGINE=MergeTree
+        ORDER BY (run_id, scenario, node, stage, name, ts)
+        TTL ts + INTERVAL 30 DAY DELETE""",
     ]
     for ddl in ddls:
         requests.post(url, params={"query": ddl}, headers=_auth_headers(), timeout=20)
