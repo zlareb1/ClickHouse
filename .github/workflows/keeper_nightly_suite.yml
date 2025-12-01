@@ -1,0 +1,366 @@
+name: Keeper Nightly Suite (non-TLS)
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+    - cron: '0 1 * * 1'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Run mode: nightly|stress|soak'
+        required: false
+        default: 'nightly'
+        type: choice
+        options: [nightly, stress, soak]
+      sink_url:
+        description: 'Optional ClickHouse sink URL (http://host:8123)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: keeper-nightly-suite-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  nightly:
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.mode == 'nightly') || (github.event_name == 'schedule' && github.event.schedule == '0 3 * * *') }}
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
+        ff_profile: [baseline, secret]
+    env:
+      # Shard by scenario id hashing (handled by loader)
+      KEEPER_TOTAL_SHARDS: 2
+      KEEPER_SHARD_INDEX: ${{ matrix.shard }}
+      # Strict mode: no skips, fail on setup errors
+      KEEPER_STRICT: 1
+      # Default scenario files (non-TLS)
+      KEEPER_SCENARIO_FILE: core.yaml,cha.yaml
+      # Optional metrics sink
+      KEEPER_METRICS_CLICKHOUSE_URL: ${{ inputs.sink_url || secrets.KEEPER_METRICS_CLICKHOUSE_URL }}
+      KEEPER_METRICS_CLICKHOUSE_USER: ${{ secrets.KEEPER_METRICS_CLICKHOUSE_USER }}
+      KEEPER_METRICS_CLICKHOUSE_PASSWORD: ${{ secrets.KEEPER_METRICS_CLICKHOUSE_PASSWORD }}
+      KEEPER_METRICS_DB: keeper_stress_tests
+      # Commit SHA for reporting
+      COMMIT_SHA: ${{ github.sha }}
+      # Optional feature flags and coordination overrides (from repo/environment secrets)
+      KEEPER_FEATURE_FLAGS: ${{ matrix.ff_profile == 'secret' && secrets.KEEPER_FEATURE_FLAGS || '' }}
+      KEEPER_COORD_OVERRIDES_XML: ${{ secrets.KEEPER_COORD_OVERRIDES_XML }}
+      JOB_NAME: keeper-nightly-suite
+      PR_NUMBER: ${{ github.event.pull_request.number || 0 }}
+      KEEPER_CIDB_URL: ${{ secrets.KEEPER_CIDB_URL }}
+      KEEPER_CIDB_USER: ${{ secrets.KEEPER_CIDB_USER }}
+      KEEPER_CIDB_PASSWORD: ${{ secrets.KEEPER_CIDB_PASSWORD }}
+      KEEPER_CLEAN_ARTIFACTS: 1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: System deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iproute2 iptables dmsetup curl stress-ng netcat-openbsd
+
+      - name: Install Python deps
+        run: |
+          python -m pip install -U pip
+          python -m pip install -r tests/stress/requirements.txt
+
+      - name: Seed sink tables (optional)
+        if: env.KEEPER_METRICS_CLICKHOUSE_URL != ''
+        run: |
+          if [ -n "${KEEPER_METRICS_CLICKHOUSE_USER}" ]; then
+            curl -sSf \
+              -H "X-ClickHouse-User: ${KEEPER_METRICS_CLICKHOUSE_USER}" \
+              -H "X-ClickHouse-Key: ${KEEPER_METRICS_CLICKHOUSE_PASSWORD}" \
+              --data-binary @tests/stress/keeper/tools/create_tables.sql \
+              "${KEEPER_METRICS_CLICKHOUSE_URL}?query=" || true
+          else
+            curl -sSf --data-binary @tests/stress/keeper/tools/create_tables.sql "${KEEPER_METRICS_CLICKHOUSE_URL}?query=" || true
+          fi
+
+      - name: List scenarios (shard ${{ matrix.shard }})
+        run: |
+          python tests/stress/keeper/tools/list_scenarios.py \
+            --files "${{ env.KEEPER_SCENARIO_FILE }}" \
+            --matrix-backends default,rocksdb \
+            --matrix-topologies 3 | head -n 120 || true
+
+      - name: Run Keeper suite (matrix backends, topology=3)
+        env:
+          # Keep containers on failure for debugging
+          KEEPER_KEEP_ON_FAIL: 1
+        run: |
+          mkdir -p artifacts
+          python tests/stress/keeper/tools/run_suite.py \
+            --jobs auto \
+            --matrix-backends default,rocksdb \
+            --matrix-topologies 3 \
+            --duration 120 \
+            --junit-xml artifacts/junit_shard${{ matrix.shard }}.xml \
+            --rerun-failures 2
+
+      - name: Upload JUnit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: keeper-junit-shard${{ matrix.shard }}
+          path: artifacts/junit_shard${{ matrix.shard }}.xml
+          if-no-files-found: error
+
+      - name: Upload repro YAMLs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: keeper-repros-shard${{ matrix.shard }}
+          path: /tmp/keeper_repro_*.yaml
+          if-no-files-found: ignore
+
+      - name: Enforce no skipped tests
+        if: always()
+        run: |
+          if grep -E '<skipped' artifacts/junit_shard${{ matrix.shard }}.xml | grep -vi -E 'pytest.xfail|xfail|expected failure' | grep -q .; then
+            echo 'Skipped (non-xfail) tests detected. Suite must not skip tests.' >&2
+            exit 1
+          fi
+
+      - name: Summarize JUnit
+        if: always()
+        run: |
+          python - <<'PY'
+          import os, xml.etree.ElementTree as ET
+          p = 'artifacts/junit_shard${{ matrix.shard }}.xml'
+          try:
+              r = ET.parse(p).getroot()
+              s = f"junit shard=${{ matrix.shard }} tests={r.attrib.get('tests',0)} failures={r.attrib.get('failures',0)} errors={r.attrib.get('errors',0)} skipped={r.attrib.get('skipped',0)}"
+              print(s)
+              summ = os.environ.get('GITHUB_STEP_SUMMARY')
+              if summ:
+                  with open(summ, 'a') as f:
+                      f.write(s + '\n')
+          except Exception as e:
+              print(f'parse error: {e}')
+          PY
+
+  stress:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'stress' }}
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+        backend: [default, rocksdb]
+    env:
+      KEEPER_TOTAL_SHARDS: 4
+      KEEPER_SHARD_INDEX: ${{ matrix.shard }}
+      COMMIT_SHA: ${{ github.sha }}
+      KEEPER_STRICT: 1
+      KEEPER_METRICS_CLICKHOUSE_URL: ${{ inputs.sink_url || secrets.KEEPER_METRICS_CLICKHOUSE_URL }}
+      KEEPER_METRICS_CLICKHOUSE_USER: ${{ secrets.KEEPER_METRICS_CLICKHOUSE_USER }}
+      KEEPER_METRICS_CLICKHOUSE_PASSWORD: ${{ secrets.KEEPER_METRICS_CLICKHOUSE_PASSWORD }}
+      KEEPER_METRICS_DB: keeper_stress_tests
+      KEEPER_SCENARIO_FILE: core.yaml,experiments.yaml
+      JOB_NAME: keeper-stress
+      PR_NUMBER: ${{ github.event.pull_request.number || 0 }}
+      KEEPER_CIDB_URL: ${{ secrets.KEEPER_CIDB_URL }}
+      KEEPER_CIDB_USER: ${{ secrets.KEEPER_CIDB_USER }}
+      KEEPER_CIDB_PASSWORD: ${{ secrets.KEEPER_CIDB_PASSWORD }}
+      KEEPER_CLEAN_ARTIFACTS: 1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iproute2 iptables dmsetup curl stress-ng netcat-openbsd
+
+      - name: Install Python deps
+        run: |
+          python -m pip install -U pip
+          python -m pip install -r tests/stress/requirements.txt
+
+      - name: Seed sink tables (optional)
+        if: env.KEEPER_METRICS_CLICKHOUSE_URL != ''
+        run: |
+          if [ -n "${KEEPER_METRICS_CLICKHOUSE_USER}" ]; then
+            curl -sSf \
+              -H "X-ClickHouse-User: ${KEEPER_METRICS_CLICKHOUSE_USER}" \
+              -H "X-ClickHouse-Key: ${KEEPER_METRICS_CLICKHOUSE_PASSWORD}" \
+              --data-binary @tests/stress/keeper/tools/create_tables.sql \
+              "${KEEPER_METRICS_CLICKHOUSE_URL}?query=" || true
+          else
+            curl -sSf --data-binary @tests/stress/keeper/tools/create_tables.sql "${KEEPER_METRICS_CLICKHOUSE_URL}?query=" || true
+          fi
+
+      - name: Run Keeper suite (curated)
+        run: |
+          mkdir -p artifacts
+          python tests/stress/keeper/tools/run_suite.py \
+            --jobs auto \
+            --matrix-backends "${{ matrix.backend }}" \
+            --matrix-topologies 3 \
+            --files "${KEEPER_SCENARIO_FILE}" \
+            --duration 120 \
+            --junit-xml artifacts/junit_shard${{ matrix.shard }}_${{ matrix.backend }}.xml \
+            --rerun-failures 1
+
+      - name: Upload JUnit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: keeper-stress-junit-shard${{ matrix.shard }}-${{ matrix.backend }}
+          path: artifacts/junit_shard${{ matrix.shard }}_${{ matrix.backend }}.xml
+          if-no-files-found: error
+
+      - name: Upload repro YAMLs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: keeper-stress-repros-shard${{ matrix.shard }}-${{ matrix.backend }}
+          path: /tmp/keeper_repro_*.yaml
+          if-no-files-found: ignore
+
+      - name: Enforce no skipped tests
+        if: always()
+        run: |
+          if grep -E '<skipped' artifacts/junit_shard${{ matrix.shard }}_${{ matrix.backend }}.xml | grep -vi -E 'pytest.xfail|xfail|expected failure' | grep -q .; then
+            echo 'Skipped (non-xfail) tests detected. Suite must not skip tests.' >&2
+            exit 1
+          fi
+
+      - name: Summarize JUnit
+        if: always()
+        run: |
+          python - <<'PY'
+          import os, xml.etree.ElementTree as ET
+          p = 'artifacts/junit_shard${{ matrix.shard }}_${{ matrix.backend }}.xml'
+          try:
+              r = ET.parse(p).getroot()
+              s = f"junit shard=${{ matrix.shard }} backend=${{ matrix.backend }} tests={r.attrib.get('tests',0)} failures={r.attrib.get('failures',0)} errors={r.attrib.get('errors',0)} skipped={r.attrib.get('skipped',0)}"
+              print(s)
+              summ = os.environ.get('GITHUB_STEP_SUMMARY')
+              if summ:
+                  with open(summ, 'a') as f:
+                      f.write(s + '\n')
+          except Exception as e:
+              print(f'parse error: {e}')
+          PY
+
+  soak:
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.mode == 'soak') || (github.event_name == 'schedule' && github.event.schedule == '0 1 * * 1') }}
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
+    env:
+      KEEPER_TOTAL_SHARDS: 2
+      KEEPER_SHARD_INDEX: ${{ matrix.shard }}
+      KEEPER_STRICT: 1
+      KEEPER_SCENARIO_FILE: core.yaml,cha.yaml
+      KEEPER_RUN_WEEKLY: 1
+      KEEPER_METRICS_CLICKHOUSE_URL: ${{ inputs.sink_url || secrets.KEEPER_METRICS_CLICKHOUSE_URL }}
+      KEEPER_METRICS_CLICKHOUSE_USER: ${{ secrets.KEEPER_METRICS_CLICKHOUSE_USER }}
+      KEEPER_METRICS_CLICKHOUSE_PASSWORD: ${{ secrets.KEEPER_METRICS_CLICKHOUSE_PASSWORD }}
+      KEEPER_METRICS_DB: keeper_stress_tests
+      COMMIT_SHA: ${{ github.sha }}
+      JOB_NAME: keeper-weekly-soak
+      PR_NUMBER: ${{ github.event.pull_request.number || 0 }}
+      KEEPER_CIDB_URL: ${{ secrets.KEEPER_CIDB_URL }}
+      KEEPER_CIDB_USER: ${{ secrets.KEEPER_CIDB_USER }}
+      KEEPER_CIDB_PASSWORD: ${{ secrets.KEEPER_CIDB_PASSWORD }}
+      KEEPER_CLEAN_ARTIFACTS: 1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: System deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iproute2 iptables dmsetup curl stress-ng netcat-openbsd
+
+      - name: Install Python deps
+        run: |
+          python -m pip install -U pip
+          python -m pip install -r tests/stress/requirements.txt
+
+      - name: Seed sink tables (optional)
+        if: env.KEEPER_METRICS_CLICKHOUSE_URL != ''
+        run: |
+          if [ -n "${KEEPER_METRICS_CLICKHOUSE_USER}" ]; then
+            curl -sSf \
+              -H "X-ClickHouse-User: ${KEEPER_METRICS_CLICKHOUSE_USER}" \
+              -H "X-ClickHouse-Key: ${KEEPER_METRICS_CLICKHOUSE_PASSWORD}" \
+              --data-binary @tests/stress/keeper/tools/create_tables.sql \
+              "${KEEPER_METRICS_CLICKHOUSE_URL}?query=" || true
+          else
+            curl -sSf --data-binary @tests/stress/keeper/tools/create_tables.sql "${KEEPER_METRICS_CLICKHOUSE_URL}?query=" || true
+          fi
+
+      - name: Run Keeper soak suite (long duration)
+        env:
+          KEEPER_KEEP_ON_FAIL: 1
+        run: |
+          mkdir -p artifacts
+          python tests/stress/keeper/tools/run_suite.py \
+            --jobs auto \
+            --matrix-backends default,rocksdb \
+            --matrix-topologies 3 \
+            --duration 600 \
+            --junit-xml artifacts/junit_soak_shard${{ matrix.shard }}.xml \
+            --rerun-failures 1
+
+      - name: Upload JUnit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: keeper-soak-junit-shard${{ matrix.shard }}
+          path: artifacts/junit_soak_shard${{ matrix.shard }}.xml
+          if-no-files-found: error
+
+      - name: Upload repro YAMLs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: keeper-soak-repros-shard${{ matrix.shard }}
+          path: /tmp/keeper_repro_*.yaml
+          if-no-files-found: ignore
+
+      - name: Enforce no skipped tests
+        if: always()
+        run: |
+          if grep -E '<skipped' artifacts/junit_soak_shard${{ matrix.shard }}.xml | grep -vi -E 'pytest.xfail|xfail|expected failure' | grep -q .; then
+            echo 'Skipped (non-xfail) tests detected. Suite must not skip tests.' >&2
+            exit 1
+          fi
+
+      - name: Summarize JUnit
+        if: always()
+        run: |
+          python - <<'PY'
+          import os, xml.etree.ElementTree as ET
+          p = 'artifacts/junit_soak_shard${{ matrix.shard }}.xml'
+          try:
+              r = ET.parse(p).getroot()
+              s = f"junit soak shard=${{ matrix.shard }} tests={r.attrib.get('tests',0)} failures={r.attrib.get('failures',0)} errors={r.attrib.get('errors',0)} skipped={r.attrib.get('skipped',0)}"
+              print(s)
+              summ = os.environ.get('GITHUB_STEP_SUMMARY')
+              if summ:
+                  with open(summ, 'a') as f:
+                      f.write(s + '\n')
+          except Exception as e:
+              print(f'parse error: {e}')
+          PY
