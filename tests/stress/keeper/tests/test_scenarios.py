@@ -24,7 +24,6 @@ def _apply_gate(gate, nodes, leader, ctx, summary):
 def _snapshot_and_sink(nodes, stage, scenario_id, topo, run_meta, sink_url, run_id=""):
     if not sink_url:
         return
-    minimal = os.environ.get("KEEPER_SINK_MINIMAL", "").strip().lower() in ("1","true","yes","on")
     fourlw_rows=[]; prom_rows=[]; chm_rows=[]; cham_rows=[]; tr_rows=[]; prom_parsed_rows=[]; metrics_ts_rows=[]
     # For fail stage, only snapshot leader to reduce volume
     snap_nodes = nodes
@@ -207,19 +206,6 @@ def _snapshot_and_sink(nodes, stage, scenario_id, topo, run_meta, sink_url, run_
                 })
         except Exception:
             pass
-    if not minimal:
-        if fourlw_rows:
-            sink_clickhouse(sink_url, "keeper_fourlw", fourlw_rows)
-        if prom_rows:
-            sink_clickhouse(sink_url, "keeper_prom", prom_rows)
-        if prom_parsed_rows:
-            sink_clickhouse(sink_url, "keeper_prom_parsed", prom_parsed_rows)
-        if chm_rows:
-            sink_clickhouse(sink_url, "keeper_ch_metrics", chm_rows)
-        if cham_rows:
-            sink_clickhouse(sink_url, "keeper_ch_async_metrics", cham_rows)
-        if tr_rows:
-            sink_clickhouse(sink_url, "keeper_trace_log", tr_rows)
     if metrics_ts_rows:
         sink_clickhouse(sink_url, "keeper_metrics_ts", metrics_ts_rows)
 
