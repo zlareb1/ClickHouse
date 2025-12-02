@@ -3,7 +3,7 @@ import os, shutil
 from ..framework import faults as F
 from ..framework.faults import apply_step as apply_step_dispatcher
 from ..framework.workloads import KeeperBench, servers_arg
-from ..framework.probes import is_leader, count_leaders, four, mntr, wchs_total, lgif, srvr, prom_metrics, ch_metrics, ch_async_metrics, ch_trace_log
+from ..framework.probes import is_leader, count_leaders, mntr, lgif, prom_metrics, ch_metrics, ch_async_metrics
 from ..framework.prom_parse import parse_prometheus_text
 from ..framework.gates import single_leader, backlog_drains, error_rate_le, p99_le, watch_delta_within, no_watcher_hotspot, ephemerals_gone_within, ready_expect, lgif_monotone, apply_gate
 from ..framework.sink import sink_clickhouse
@@ -24,7 +24,7 @@ def _apply_gate(gate, nodes, leader, ctx, summary):
 def _snapshot_and_sink(nodes, stage, scenario_id, topo, run_meta, sink_url, run_id=""):
     if not sink_url:
         return
-    fourlw_rows=[]; prom_rows=[]; chm_rows=[]; cham_rows=[]; tr_rows=[]; prom_parsed_rows=[]; metrics_ts_rows=[]
+    metrics_ts_rows=[]
     # For fail stage, only snapshot leader to reduce volume
     snap_nodes = nodes
     if stage == "fail":
@@ -37,101 +37,13 @@ def _snapshot_and_sink(nodes, stage, scenario_id, topo, run_meta, sink_url, run_
             snap_nodes = nodes[:1]
     for n in snap_nodes:
         try:
-            m=mntr(n); l=lgif(n); s=srvr(n)
-            fourlw_rows.append({
-                "run_id": run_id,
-                "commit_sha": run_meta.get("commit_sha","local"),
-                "backend": run_meta.get("backend","default"),
-                "scenario": scenario_id,
-                "topology": topo,
-                "node": n.name,
-                "stage": stage,
-                "mntr_json": json.dumps(m),
-                "lgif_json": json.dumps(l),
-                "srvr_text": s,
-            })
-            try:
-                for _k, _v in (m or {}).items():
-                    try:
-                        _val = float(_v)
-                    except Exception:
-                        continue
-                    metrics_ts_rows.append({
-                        "run_id": run_id,
-                        "commit_sha": run_meta.get("commit_sha","local"),
-                        "backend": run_meta.get("backend","default"),
-                        "scenario": scenario_id,
-                        "topology": topo,
-                        "node": n.name,
-                        "stage": stage,
-                        "source": "mntr",
-                        "name": str(_k),
-                        "value": _val,
-                        "labels_json": "{}",
-                    })
-            except Exception:
-                pass
-        except Exception:
-            pass
-        try:
-            p=prom_metrics(n)
-            prom_rows.append({
-                "run_id": run_id,
-                "commit_sha": run_meta.get("commit_sha","local"),
-                "backend": run_meta.get("backend","default"),
-                "scenario": scenario_id,
-                "topology": topo,
-                "node": n.name,
-                "stage": stage,
-                "metrics_text": p,
-            })
-            try:
-                for r in parse_prometheus_text(p):
-                    name = r.get("name","")
-                    val = 0.0
-                    try:
-                        val = float(r.get("value", 0.0))
-                    except Exception:
-                        val = 0.0
-                    lj = r.get("labels_json", "{}")
-                    prom_parsed_rows.append({
-                        "run_id": run_id,
-                        "commit_sha": run_meta.get("commit_sha","local"),
-                        "backend": run_meta.get("backend","default"),
-                        "scenario": scenario_id,
-                        "topology": topo,
-                        "node": n.name,
-                        "stage": stage,
-                        "name": name,
-                        "value": val,
-                        "labels_json": lj,
-                    })
-                    metrics_ts_rows.append({
-                        "run_id": run_id,
-                        "commit_sha": run_meta.get("commit_sha","local"),
-                        "backend": run_meta.get("backend","default"),
-                        "scenario": scenario_id,
-                        "topology": topo,
-                        "node": n.name,
-                        "stage": stage,
-                        "source": "prom",
-                        "name": name,
-                        "value": val,
-                        "labels_json": lj,
-                    })
-            except Exception:
-                pass
-        except Exception:
-            pass
-        try:
-            for r in ch_metrics(n):
-                nm = r.get("name","")
-                val = 0.0
+            m=mntr(n); l=lgif(n)
+            for _k, _v in (m or {}).items():
                 try:
-                    val = float(r.get("value",0))
+                    _val = float(_v)
                 except Exception:
-                    val = 0.0
-                chm_rows.append({
+                    continue
+                metrics_ts_rows.append({
                     "run_id": run_id,
                     "commit_sha": run_meta.get("commit_sha","local"),
                     "backend": run_meta.get("backend","default"),
@@ -139,9 +51,45 @@ def _snapshot_and_sink(nodes, stage, scenario_id, topo, run_meta, sink_url, run_
                     "topology": topo,
                     "node": n.name,
                     "stage": stage,
-                    "name": nm,
-                    "value": val,
+                    "source": "mntr",
+                    "name": str(_k),
+                    "value": _val,
+                    "labels_json": "{}",
                 })
+        except Exception:
+            pass
+        try:
+            p=prom_metrics(n)
+            for r in parse_prometheus_text(p):
+                name = r.get("name","")
+                val = 0.0
+                try:
+                    val = float(r.get("value", 0.0))
+                except Exception:
+                    val = 0.0
+                lj = r.get("labels_json", "{}")
+                metrics_ts_rows.append({
+                    "run_id": run_id,
+                    "commit_sha": run_meta.get("commit_sha","local"),
+                    "backend": run_meta.get("backend","default"),
+                    "scenario": scenario_id,
+                    "topology": topo,
+                    "node": n.name,
+                    "stage": stage,
+                    "source": "prom",
+                    "name": name,
+                    "value": val,
+                    "labels_json": lj,
+                })
+        except Exception:
+            pass
+        try:
+            for r in ch_metrics(n):
+                nm = r.get("name","")
+                try:
+                    val = float(r.get("value",0))
+                except Exception:
+                    val = 0.0
                 metrics_ts_rows.append({
                     "run_id": run_id,
                     "commit_sha": run_meta.get("commit_sha","local"),
@@ -160,22 +108,10 @@ def _snapshot_and_sink(nodes, stage, scenario_id, topo, run_meta, sink_url, run_
         try:
             for r in ch_async_metrics(n):
                 nm = r.get("name","")
-                val = 0.0
                 try:
                     val = float(r.get("value",0))
                 except Exception:
                     val = 0.0
-                cham_rows.append({
-                    "run_id": run_id,
-                    "commit_sha": run_meta.get("commit_sha","local"),
-                    "backend": run_meta.get("backend","default"),
-                    "scenario": scenario_id,
-                    "topology": topo,
-                    "node": n.name,
-                    "stage": stage,
-                    "name": nm,
-                    "value": val,
-                })
                 metrics_ts_rows.append({
                     "run_id": run_id,
                     "commit_sha": run_meta.get("commit_sha","local"),
@@ -188,21 +124,6 @@ def _snapshot_and_sink(nodes, stage, scenario_id, topo, run_meta, sink_url, run_
                     "name": nm,
                     "value": val,
                     "labels_json": "{}",
-                })
-        except Exception:
-            pass
-        try:
-            tlog=ch_trace_log(n, 200)
-            if tlog:
-                tr_rows.append({
-                    "run_id": run_id,
-                    "commit_sha": run_meta.get("commit_sha","local"),
-                    "backend": run_meta.get("backend","default"),
-                    "scenario": scenario_id,
-                    "topology": topo,
-                    "node": n.name,
-                    "stage": stage,
-                    "trace_text": tlog,
                 })
         except Exception:
             pass
@@ -346,18 +267,6 @@ def test_scenario(scenario, cluster_factory, request, run_meta):
         elif ctx.get("bench_summary"):
             summary = ctx.get("bench_summary") or {}
         for gate in scenario.get("gates", []): _apply_gate(gate, nodes, leader, ctx, summary)
-        if sink_url:
-            run_summary = os.environ.get("KEEPER_SINK_RUN_SUMMARY", "").strip().lower() in ("1","true","yes","on")
-            if run_summary:
-                run_row={
-                    "run_id": run_id,
-                    "commit_sha": run_meta_eff.get("commit_sha","local"),
-                    "backend": backend,
-                    "scenario": scenario.get("id",""),
-                    "topology": topo,
-                    "summary_json": json.dumps(summary),
-                }
-                sink_clickhouse(sink_url, "keeper_bench_runs", [run_row])
         _snapshot_and_sink(nodes, "post", scenario.get("id",""), topo, run_meta_eff, sink_url, run_id)
         try:
             from ci.praktika.cidb import CIDB
@@ -392,6 +301,14 @@ def test_scenario(scenario, cluster_factory, request, run_meta):
                 status = "success"
                 tdur_ms = int(max(0, (time.time() - start_ts)) * 1000)
                 ts_str = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(start_ts))
+                # enrich summary json with backend, scenario id, and run_id for Grafana comparisons
+                try:
+                    if isinstance(summary, dict):
+                        summary.setdefault("backend", backend)
+                        summary.setdefault("scenario", scenario.get("id",""))
+                        summary.setdefault("run_id", run_id)
+                except Exception:
+                    pass
                 row = {
                     "pull_request_number": prn,
                     "commit_sha": run_meta_eff.get("commit_sha", "local"),
