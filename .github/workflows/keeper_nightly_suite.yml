@@ -41,6 +41,13 @@ jobs:
       KEEPER_STRICT: 1
       # Default scenario files (non-TLS)
       KEEPER_SCENARIO_FILE: core.yaml,cha.yaml
+      # Nightly stress knobs
+      KEEPER_DURATION: 900              # 15 minutes per run
+      KEEPER_CONTROL_PORT: 9182         # enable /ready gates
+      KEEPER_RANDOM_FAULTS_COUNT: 2
+      KEEPER_SEEDS: 1,2
+      KEEPER_STRICT_FAULTS: 0           # tolerate dm faults on GH-hosted; set 1 on self-hosted privileged
+      KEEPER_RANDOM_FAULTS_EXCLUDE: dm_delay,dm_error  # exclude dm faults in Nightly on hosted
       
       # Optional metrics sink
       KEEPER_METRICS_CLICKHOUSE_URL: ${{ inputs.sink_url || secrets.KEEPER_METRICS_CLICKHOUSE_URL }}
@@ -110,26 +117,39 @@ TTL ts + INTERVAL 30 DAY DELETE;";
             --matrix-backends default,rocksdb \
             --matrix-topologies 3 | head -n 120 || true
 
-      - name: Run Keeper suite (matrix backends, topology=3)
+      - name: Faults=on (core scenarios)
         env:
-          # Keep containers on failure for debugging
           KEEPER_KEEP_ON_FAIL: 1
         run: |
           mkdir -p artifacts
-          python tests/stress/keeper/tools/run_suite.py \
-            --jobs auto \
-            --matrix-backends default,rocksdb \
-            --matrix-topologies 3 \
-            --duration 120 \
-            --junit-xml artifacts/junit_shard${{ matrix.shard }}.xml \
-            --rerun-failures 2
+          python -m pytest -q -n 4 tests/stress/keeper/tests/test_scenarios.py \
+            --matrix-backends=default,rocksdb \
+            --matrix-topologies=3 \
+            --faults=on \
+            --duration=${{ env.KEEPER_DURATION }} \
+            --junit-xml artifacts/junit_shard${{ matrix.shard }}_on.xml
+
+      - name: Faults=random (seeds)
+        run: |
+          for s in 1 2; do
+            python -m pytest -q -n 4 tests/stress/keeper/tests/test_scenarios.py \
+              --matrix-backends=default,rocksdb \
+              --matrix-topologies=3 \
+              --faults=random \
+              --random-faults-count=${{ env.KEEPER_RANDOM_FAULTS_COUNT }} \
+              --seed=$s \
+              --duration=${{ env.KEEPER_DURATION }} \
+              --junit-xml artifacts/junit_shard${{ matrix.shard }}_rand_seed${s}.xml || exit 1;
+          done
 
       - name: Upload JUnit
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: keeper-junit-shard${{ matrix.shard }}
-          path: artifacts/junit_shard${{ matrix.shard }}.xml
+          path: |
+            artifacts/junit_shard${{ matrix.shard }}_on.xml
+            artifacts/junit_shard${{ matrix.shard }}_rand_seed*.xml
           if-no-files-found: error
 
       - name: Upload repro YAMLs
@@ -143,25 +163,36 @@ TTL ts + INTERVAL 30 DAY DELETE;";
       - name: Enforce no skipped tests
         if: always()
         run: |
-          if grep -E '<skipped' artifacts/junit_shard${{ matrix.shard }}.xml | grep -vi -E 'pytest.xfail|xfail|expected failure' | grep -q .; then
-            echo 'Skipped (non-xfail) tests detected. Suite must not skip tests.' >&2
-            exit 1
-          fi
+          set -e
+          rc=0
+          for p in artifacts/junit_shard${{ matrix.shard }}_on.xml artifacts/junit_shard${{ matrix.shard }}_rand_seed*.xml; do
+            [ -f "$p" ] || continue
+            if grep -E '<skipped' "$p" | grep -vi -E 'pytest.xfail|xfail|expected failure' | grep -q .; then
+              echo "Skipped (non-xfail) tests detected in $p" >&2
+              rc=1
+            fi
+          done
+          exit $rc
 
       - name: Summarize JUnit
         if: always()
         run: |
           python - <<'PY'
           import os, xml.etree.ElementTree as ET
-          p = 'artifacts/junit_shard${{ matrix.shard }}.xml'
+          import glob
+          pats = [
+              'artifacts/junit_shard${{ matrix.shard }}_on.xml',
+              *glob.glob('artifacts/junit_shard${{ matrix.shard }}_rand_seed*.xml')
+          ]
           try:
-              r = ET.parse(p).getroot()
-              s = f"junit shard=${{ matrix.shard }} tests={r.attrib.get('tests',0)} failures={r.attrib.get('failures',0)} errors={r.attrib.get('errors',0)} skipped={r.attrib.get('skipped',0)}"
-              print(s)
-              summ = os.environ.get('GITHUB_STEP_SUMMARY')
-              if summ:
-                  with open(summ, 'a') as f:
-                      f.write(s + '\n')
+              for p in pats:
+                  r = ET.parse(p).getroot()
+                  s = f"junit file={p} shard=${{ matrix.shard }} tests={r.attrib.get('tests',0)} failures={r.attrib.get('failures',0)} errors={r.attrib.get('errors',0)} skipped={r.attrib.get('skipped',0)}"
+                  print(s)
+                  summ = os.environ.get('GITHUB_STEP_SUMMARY')
+                  if summ:
+                      with open(summ, 'a') as f:
+                          f.write(s + '\n')
           except Exception as e:
               print(f'parse error: {e}')
           PY
@@ -229,7 +260,6 @@ TTL ts + INTERVAL 30 DAY DELETE;";
           else
             curl -sSf --data-binary "$DDL" "${KEEPER_METRICS_CLICKHOUSE_URL}" || true
           fi
-
       - name: Run Keeper suite (curated)
         run: |
           mkdir -p artifacts
@@ -271,15 +301,20 @@ TTL ts + INTERVAL 30 DAY DELETE;";
         run: |
           python - <<'PY'
           import os, xml.etree.ElementTree as ET
-          p = 'artifacts/junit_shard${{ matrix.shard }}_${{ matrix.backend }}.xml'
+          import glob
+          pats = [
+              'artifacts/junit_soak_shard${{ matrix.shard }}_on.xml',
+              *glob.glob('artifacts/junit_soak_shard${{ matrix.shard }}_rand_seed*.xml')
+          ]
           try:
-              r = ET.parse(p).getroot()
-              s = f"junit shard=${{ matrix.shard }} backend=${{ matrix.backend }} tests={r.attrib.get('tests',0)} failures={r.attrib.get('failures',0)} errors={r.attrib.get('errors',0)} skipped={r.attrib.get('skipped',0)}"
-              print(s)
-              summ = os.environ.get('GITHUB_STEP_SUMMARY')
-              if summ:
-                  with open(summ, 'a') as f:
-                      f.write(s + '\n')
+              for p in pats:
+                  r = ET.parse(p).getroot()
+                  s = f"junit soak file={p} shard=${{ matrix.shard }} tests={r.attrib.get('tests',0)} failures={r.attrib.get('failures',0)} errors={r.attrib.get('errors',0)} skipped={r.attrib.get('skipped',0)}"
+                  print(s)
+                  summ = os.environ.get('GITHUB_STEP_SUMMARY')
+                  if summ:
+                      with open(summ, 'a') as f:
+                          f.write(s + '\n')
           except Exception as e:
               print(f'parse error: {e}')
           PY
@@ -297,6 +332,12 @@ TTL ts + INTERVAL 30 DAY DELETE;";
       KEEPER_STRICT: 1
       KEEPER_SCENARIO_FILE: core.yaml,cha.yaml
       KEEPER_RUN_WEEKLY: 1
+      # Weekly heavy knobs
+      KEEPER_DURATION: 1800            # 30 minutes (bump to 3600 for 60m)
+      KEEPER_CONTROL_PORT: 9182
+      KEEPER_RANDOM_FAULTS_COUNT: 3
+      KEEPER_SEEDS: 1,2,3,4,5
+      KEEPER_STRICT_FAULTS: 0          # set 1 if self-hosted privileged is used
       KEEPER_METRICS_CLICKHOUSE_URL: ${{ inputs.sink_url || secrets.KEEPER_METRICS_CLICKHOUSE_URL }}
       KEEPER_METRICS_CLICKHOUSE_USER: ${{ secrets.KEEPER_METRICS_CLICKHOUSE_USER }}
       KEEPER_METRICS_CLICKHOUSE_PASSWORD: ${{ secrets.KEEPER_METRICS_CLICKHOUSE_PASSWORD }}
@@ -353,25 +394,39 @@ TTL ts + INTERVAL 30 DAY DELETE;";
             curl -sSf --data-binary "$DDL" "${KEEPER_METRICS_CLICKHOUSE_URL}" || true
           fi
 
-      - name: Run Keeper soak suite (long duration)
+      - name: Faults=on (weekly heavy)
         env:
           KEEPER_KEEP_ON_FAIL: 1
         run: |
           mkdir -p artifacts
-          python tests/stress/keeper/tools/run_suite.py \
-            --jobs auto \
-            --matrix-backends default,rocksdb \
-            --matrix-topologies 3 \
-            --duration 600 \
-            --junit-xml artifacts/junit_soak_shard${{ matrix.shard }}.xml \
-            --rerun-failures 1
+          python -m pytest -q -n 6 tests/stress/keeper/tests/test_scenarios.py \
+            --matrix-backends=default,rocksdb \
+            --matrix-topologies=3 \
+            --faults=on \
+            --duration=${{ env.KEEPER_DURATION }} \
+            --junit-xml artifacts/junit_soak_shard${{ matrix.shard }}_on.xml
+
+      - name: Faults=random (weekly heavy seeds)
+        run: |
+          for s in 1 2 3 4 5; do
+            python -m pytest -q -n 6 tests/stress/keeper/tests/test_scenarios.py \
+              --matrix-backends=default,rocksdb \
+              --matrix-topologies=3 \
+              --faults=random \
+              --random-faults-count=${{ env.KEEPER_RANDOM_FAULTS_COUNT }} \
+              --seed=$s \
+              --duration=${{ env.KEEPER_DURATION }} \
+              --junit-xml artifacts/junit_soak_shard${{ matrix.shard }}_rand_seed${s}.xml || exit 1;
+          done
 
       - name: Upload JUnit
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: keeper-soak-junit-shard${{ matrix.shard }}
-          path: artifacts/junit_soak_shard${{ matrix.shard }}.xml
+          path: |
+            artifacts/junit_soak_shard${{ matrix.shard }}_on.xml
+            artifacts/junit_soak_shard${{ matrix.shard }}_rand_seed*.xml
           if-no-files-found: error
 
       - name: Upload repro YAMLs
@@ -385,25 +440,36 @@ TTL ts + INTERVAL 30 DAY DELETE;";
       - name: Enforce no skipped tests
         if: always()
         run: |
-          if grep -E '<skipped' artifacts/junit_soak_shard${{ matrix.shard }}.xml | grep -vi -E 'pytest.xfail|xfail|expected failure' | grep -q .; then
-            echo 'Skipped (non-xfail) tests detected. Suite must not skip tests.' >&2
-            exit 1
-          fi
+          set -e
+          rc=0
+          for p in artifacts/junit_soak_shard${{ matrix.shard }}_on.xml artifacts/junit_soak_shard${{ matrix.shard }}_rand_seed*.xml; do
+            [ -f "$p" ] || continue
+            if grep -E '<skipped' "$p" | grep -vi -E 'pytest.xfail|xfail|expected failure' | grep -q .; then
+              echo "Skipped (non-xfail) tests detected in $p" >&2
+              rc=1
+            fi
+          done
+          exit $rc
 
       - name: Summarize JUnit
         if: always()
         run: |
           python - <<'PY'
           import os, xml.etree.ElementTree as ET
-          p = 'artifacts/junit_soak_shard${{ matrix.shard }}.xml'
+          import glob
+          pats = [
+              'artifacts/junit_soak_shard${{ matrix.shard }}_on.xml',
+              *glob.glob('artifacts/junit_soak_shard${{ matrix.shard }}_rand_seed*.xml')
+          ]
           try:
-              r = ET.parse(p).getroot()
-              s = f"junit soak shard=${{ matrix.shard }} tests={r.attrib.get('tests',0)} failures={r.attrib.get('failures',0)} errors={r.attrib.get('errors',0)} skipped={r.attrib.get('skipped',0)}"
-              print(s)
-              summ = os.environ.get('GITHUB_STEP_SUMMARY')
-              if summ:
-                  with open(summ, 'a') as f:
-                      f.write(s + '\n')
+              for p in pats:
+                  r = ET.parse(p).getroot()
+                  s = f"junit soak file={p} shard=${{ matrix.shard }} tests={r.attrib.get('tests',0)} failures={r.attrib.get('failures',0)} errors={r.attrib.get('errors',0)} skipped={r.attrib.get('skipped',0)}"
+                  print(s)
+                  summ = os.environ.get('GITHUB_STEP_SUMMARY')
+                  if summ:
+                      with open(summ, 'a') as f:
+                          f.write(s + '\n')
           except Exception as e:
               print(f'parse error: {e}')
           PY

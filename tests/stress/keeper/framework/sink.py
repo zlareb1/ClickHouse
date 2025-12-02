@@ -11,7 +11,7 @@ def ensure_sink_schema(url):
         u = os.environ.get("KEEPER_METRICS_CLICKHOUSE_USER", "").strip()
         p = os.environ.get("KEEPER_METRICS_CLICKHOUSE_PASSWORD", "").strip()
         return {"X-ClickHouse-User": u, "X-ClickHouse-Key": p} if u and p else {}
-    db = os.environ.get("KEEPER_METRICS_DB", "keeper_metrics").strip() or "keeper_metrics"
+    db = os.environ.get("KEEPER_METRICS_DB", "keeper_stress_tests").strip() or "keeper_stress_tests"
     ddls = [
         f"CREATE DATABASE IF NOT EXISTS {db}",
         f"""CREATE TABLE IF NOT EXISTS {db}.keeper_metrics_ts (
@@ -38,7 +38,7 @@ def sink_clickhouse(url, table, rows):
     if not url or not rows: return
     import requests
     ensure_sink_schema(url)
-    db = os.environ.get("KEEPER_METRICS_DB", "keeper_metrics").strip() or "keeper_metrics"
+    db = os.environ.get("KEEPER_METRICS_DB", "keeper_stress_tests").strip() or "keeper_stress_tests"
     t = table if "." in table else f"{db}.{table}"
     q=f"INSERT INTO {t} FORMAT JSONEachRow"
     # Chunk rows to reduce request size and improve retry behavior
