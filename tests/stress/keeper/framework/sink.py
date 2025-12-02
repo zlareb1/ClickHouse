@@ -14,41 +14,6 @@ def ensure_sink_schema(url):
     db = os.environ.get("KEEPER_METRICS_DB", "keeper_metrics").strip() or "keeper_metrics"
     ddls = [
         f"CREATE DATABASE IF NOT EXISTS {db}",
-        f"""CREATE TABLE IF NOT EXISTS {db}.keeper_fourlw (
-            ts DateTime DEFAULT now(),
-            run_id String, commit_sha String, backend String, scenario String, topology Int32,
-            node String, stage String, mntr_json String, lgif_json String, srvr_text String
-        ) ENGINE=MergeTree ORDER BY (run_id, node, stage, scenario) TTL ts + INTERVAL 30 DAY DELETE""",
-        f"""CREATE TABLE IF NOT EXISTS {db}.keeper_prom (
-            ts DateTime DEFAULT now(),
-            run_id String, commit_sha String, backend String, scenario String, topology Int32,
-            node String, stage String, metrics_text String
-        ) ENGINE=MergeTree ORDER BY (run_id, node, stage, scenario) TTL ts + INTERVAL 30 DAY DELETE""",
-        f"""CREATE TABLE IF NOT EXISTS {db}.keeper_prom_parsed (
-            ts DateTime DEFAULT now(),
-            run_id String, commit_sha String, backend String, scenario String, topology Int32,
-            node String, stage String, name String, value Float64, labels_json String
-        ) ENGINE=MergeTree ORDER BY (run_id, node, stage, scenario, name) TTL ts + INTERVAL 30 DAY DELETE""",
-        f"""CREATE TABLE IF NOT EXISTS {db}.keeper_ch_metrics (
-            ts DateTime DEFAULT now(),
-            run_id String, commit_sha String, backend String, scenario String, topology Int32,
-            node String, stage String, name String, value Float64
-        ) ENGINE=MergeTree ORDER BY (run_id, node, stage, scenario, name) TTL ts + INTERVAL 30 DAY DELETE""",
-        f"""CREATE TABLE IF NOT EXISTS {db}.keeper_ch_async_metrics (
-            ts DateTime DEFAULT now(),
-            run_id String, commit_sha String, backend String, scenario String, topology Int32,
-            node String, stage String, name String, value Float64
-        ) ENGINE=MergeTree ORDER BY (run_id, node, stage, scenario, name) TTL ts + INTERVAL 30 DAY DELETE""",
-        f"""CREATE TABLE IF NOT EXISTS {db}.keeper_trace_log (
-            ts DateTime DEFAULT now(),
-            run_id String, commit_sha String, backend String, scenario String, topology Int32,
-            node String, stage String, trace_text String
-        ) ENGINE=MergeTree ORDER BY (run_id, node, stage, scenario) TTL ts + INTERVAL 30 DAY DELETE""",
-        f"""CREATE TABLE IF NOT EXISTS {db}.keeper_bench_runs (
-            ts DateTime DEFAULT now(),
-            run_id String, commit_sha String, backend String, scenario String, topology Int32,
-            summary_json String
-        ) ENGINE=MergeTree ORDER BY (run_id, scenario) TTL ts + INTERVAL 30 DAY DELETE""",
         f"""CREATE TABLE IF NOT EXISTS {db}.keeper_metrics_ts (
             ts DateTime DEFAULT now(),
             run_id String,
