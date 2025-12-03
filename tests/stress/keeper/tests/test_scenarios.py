@@ -2,9 +2,9 @@ import time, pathlib, pytest, json, uuid, yaml, copy
 import os, shutil
 from ..faults import apply_step as apply_step_dispatcher
 from ..workloads import KeeperBench, servers_arg
-from ..framework.io import is_leader, count_leaders, mntr, lgif, prom_metrics, ch_metrics, ch_async_metrics
+from ..framework.io import is_leader, mntr, prom_metrics, ch_metrics, ch_async_metrics
 from ..framework.io import parse_prometheus_text
-from ..gates import single_leader, backlog_drains, error_rate_le, p99_le, watch_delta_within, no_watcher_hotspot, ephemerals_gone_within, ready_expect, lgif_monotone, apply_gate
+from ..gates import single_leader, apply_gate
 from ..framework.io import sink_clickhouse
 from ..framework.metrics import MetricsSampler
 from ..framework.core.preflight import ensure_environment
@@ -35,7 +35,7 @@ def _snapshot_and_sink(nodes, stage, scenario_id, topo, run_meta, sink_url, run_
             snap_nodes = nodes[:1]
     for n in snap_nodes:
         try:
-            m=mntr(n); l=lgif(n)
+            m=mntr(n)
             for _k, _v in (m or {}).items():
                 try:
                     _val = float(_v)
@@ -132,7 +132,6 @@ def _snapshot_and_sink(nodes, stage, scenario_id, topo, run_meta, sink_url, run_
 def test_scenario(scenario, cluster_factory, request, run_meta):
     start_ts = time.time()
     topo=scenario.get("topology",3)
-    flags=scenario.get("keeper_flags_xml","")
     backend = scenario.get("backend") or request.config.getoption("--keeper-backend")
     # Effective run_meta per test with the scenario-selected backend
     run_meta_eff = dict(run_meta or {})
@@ -288,72 +287,6 @@ def test_scenario(scenario, cluster_factory, request, run_meta):
             summary = ctx.get("bench_summary") or {}
         for gate in scenario.get("gates", []): _apply_gate(gate, nodes, leader, ctx, summary)
         _snapshot_and_sink(nodes, "post", scenario.get("id",""), topo, run_meta_eff, sink_url, run_id)
-        try:
-            from ci.praktika.cidb import CIDB
-            from ci.praktika.settings import Settings
-            from ci.praktika.info import Info
-            info = Info()
-            try:
-                url_secret = info.get_secret(Settings.SECRET_CI_DB_URL)
-                user_secret = info.get_secret(Settings.SECRET_CI_DB_USER)
-                passwd_secret = info.get_secret(Settings.SECRET_CI_DB_PASSWORD)
-            except Exception:
-                url_secret = user_secret = passwd_secret = None
-            url_w = user_w = pwd_w = None
-            if url_secret and user_secret and passwd_secret:
-                url_w, user_w, pwd_w = url_secret.join_with(user_secret).join_with(passwd_secret).get_value()
-            else:
-                try:
-                    url_w = os.environ.get("KEEPER_CIDB_URL", "").strip()
-                    user_w = os.environ.get("KEEPER_CIDB_USER", "").strip()
-                    pwd_w = os.environ.get("KEEPER_CIDB_PASSWORD", "").strip()
-                except Exception:
-                    url_w = user_w = pwd_w = None
-            if url_w and user_w and pwd_w:
-                if not Settings.CI_DB_TABLE_NAME:
-                    Settings.CI_DB_TABLE_NAME = "checks"
-                job_name = os.environ.get("JOB_NAME", "keeper-stress").strip() or "keeper-stress"
-                prn = 0
-                try:
-                    prn = int(os.environ.get("PR_NUMBER", "0") or 0)
-                except Exception:
-                    prn = 0
-                status = "success"
-                tdur_ms = int(max(0, (time.time() - start_ts)) * 1000)
-                ts_str = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(start_ts))
-                # enrich summary json with backend, scenario id, and run_id for Grafana comparisons
-                try:
-                    if isinstance(summary, dict):
-                        summary.setdefault("backend", backend)
-                        summary.setdefault("scenario", scenario.get("id",""))
-                        summary.setdefault("run_id", run_id)
-                except Exception:
-                    pass
-                row = {
-                    "pull_request_number": prn,
-                    "commit_sha": run_meta_eff.get("commit_sha", "local"),
-                    "commit_url": "",
-                    "check_name": job_name,
-                    "check_status": status,
-                    "check_duration_ms": tdur_ms,
-                    "check_start_time": ts_str,
-                    "report_url": "",
-                    "pull_request_url": "",
-                    "base_ref": "",
-                    "base_repo": "",
-                    "head_ref": "",
-                    "head_repo": "",
-                    "task_url": "",
-                    "instance_type": "",
-                    "instance_id": "",
-                    "test_name": scenario.get("id", ""),
-                    "test_status": "OK",
-                    "test_duration_ms": tdur_ms,
-                    "test_context_raw": json.dumps(summary),
-                }
-                CIDB(url=url_w, user=user_w, passwd=pwd_w).insert_rows([json.dumps(row)])
-        except Exception:
-            pass
     except Exception:
         # Emit minimal reproducible scenario to a file for debugging
         try:
@@ -369,61 +302,7 @@ def test_scenario(scenario, cluster_factory, request, run_meta):
             _snapshot_and_sink(nodes, "fail", scenario.get("id",""), topo, run_meta_eff, sink_url, run_id)
         except Exception:
             pass
-        try:
-            from ci.praktika.cidb import CIDB
-            from ci.praktika.settings import Settings
-            from ci.praktika.info import Info
-            info = Info()
-            url_secret = info.get_secret(Settings.SECRET_CI_DB_URL)
-            user_secret = info.get_secret(Settings.SECRET_CI_DB_USER)
-            passwd_secret = info.get_secret(Settings.SECRET_CI_DB_PASSWORD)
-            url_w = user_w = pwd_w = None
-            if url_secret and user_secret and passwd_secret:
-                url_w, user_w, pwd_w = url_secret.join_with(user_secret).join_with(passwd_secret).get_value()
-            else:
-                try:
-                    url_w = os.environ.get("KEEPER_CIDB_URL", "").strip()
-                    user_w = os.environ.get("KEEPER_CIDB_USER", "").strip()
-                    pwd_w = os.environ.get("KEEPER_CIDB_PASSWORD", "").strip()
-                except Exception:
-                    url_w = user_w = pwd_w = None
-            if url_w and user_w and pwd_w:
-                if not Settings.CI_DB_TABLE_NAME:
-                    Settings.CI_DB_TABLE_NAME = "checks"
-                job_name = os.environ.get("JOB_NAME", "keeper-stress").strip() or "keeper-stress"
-                prn = 0
-                try:
-                    prn = int(os.environ.get("PR_NUMBER", "0") or 0)
-                except Exception:
-                    prn = 0
-                status = "error"
-                tdur_ms = int(max(0, (time.time() - start_ts)) * 1000)
-                ts_str = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(start_ts))
-                row = {
-                    "pull_request_number": prn,
-                    "commit_sha": run_meta_eff.get("commit_sha", "local"),
-                    "commit_url": "",
-                    "check_name": job_name,
-                    "check_status": status,
-                    "check_duration_ms": tdur_ms,
-                    "check_start_time": ts_str,
-                    "report_url": "",
-                    "pull_request_url": "",
-                    "base_ref": "",
-                    "base_repo": "",
-                    "head_ref": "",
-                    "head_repo": "",
-                    "task_url": "",
-                    "instance_type": "",
-                    "instance_id": "",
-                    "test_name": scenario.get("id", ""),
-                    "test_status": "ERROR",
-                    "test_duration_ms": tdur_ms,
-                    "test_context_raw": getattr(request.node, "longreprtext", ""),
-                }
-                CIDB(url=url_w, user=user_w, passwd=pwd_w).insert_rows([json.dumps(row)])
-        except Exception:
-            pass
+        
         try:
             setattr(request.node, "keeper_failed", True)
         except Exception:

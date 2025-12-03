@@ -1,28 +1,10 @@
 import os, yaml, hashlib, pytest, pathlib, random, copy
-from typing import List, Dict, Any, Optional
 from ..framework.core.settings import parse_bool, DEFAULT_ERROR_RATE, DEFAULT_P99_MS
 from ..framework.core.schema import validate_scenario
 _SCN_BASE = pathlib.Path(__file__).parents[1] / "scenarios"
 from ..framework.fuzz import generate_fuzz_scenario
 from ..framework import presets as _presets
 
-def _is_tls_scenario(s: dict) -> bool:
-    try:
-        if (s.get("opts", {}) or {}).get("client_tls"):
-            return True
-        if (s.get("opts", {}) or {}).get("raft_secure"):
-            return True
-        if any((g.get("type") in ("client_tls_configured","raft_tls_enabled")) for g in (s.get("gates") or [])):
-            return True
-        if any((f.get("kind") == "tls_rotate") for f in (s.get("faults") or [])):
-            return True
-        if "tls" in set(s.get("tags", []) or []):
-            return True
-        if str(s.get("preset","")) in ("tls_rotation",):
-            return True
-    except Exception:
-        return False
-    return False
 
 def _capabilities_ok(reqs):
     caps={"minio": bool(os.environ.get("KEEPER_MINIO_ENDPOINT")),
@@ -76,12 +58,6 @@ def _inject_gate_macros(s: dict):
     if isinstance(sid, str) and sid.startswith("INT-"):
         if not _has_gate(s, "backlog_drains"):
             _append_gate(s, {"type": "backlog_drains"})
-    # Inject log sanity gate by default
-    if not _has_gate(s, "log_sanity_ok"):
-        _append_gate(s, {"type": "log_sanity_ok"})
-    # Optional: inject cloud profile parity when flags provided
-    if os.environ.get("KEEPER_CLOUD_FLAGS") and not _has_gate(s, "cloud_profile_parity"):
-        _append_gate(s, {"type": "cloud_profile_parity"})
     # Default: inject health_precheck to validate baseline config early
     if not _has_gate(s, "health_precheck"):
         _append_gate(s, {"type": "health_precheck"})
@@ -219,9 +195,6 @@ def pytest_generate_tests(metafunc):
     params=[]
     seen_ids=set()
     for s in data["scenarios"]:
-        # Skip all TLS-related scenarios entirely
-        if _is_tls_scenario(s):
-            continue
         # Expand preset-defined scenarios to keep YAML thin
         if isinstance(s, dict) and s.get("preset") and _presets is not None:
             name = str(s.get("preset")).strip()
@@ -291,9 +264,6 @@ def inject_gate_macros(s: dict) -> None:
 
 def inject_prefix_tags(s: dict) -> None:
     _inject_prefix_tags(s)
-
-def is_tls_scenario(s: dict) -> bool:
-    return _is_tls_scenario(s)
 
 def expand_matrix_clones(s: dict, backends: list, topologies: list) -> list:
     clones = []

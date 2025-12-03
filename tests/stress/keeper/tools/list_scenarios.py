@@ -5,7 +5,6 @@ import os
 import pathlib
 import sys
 import yaml
-import copy
 from typing import List
 
 from tests.stress.keeper.pytest_plugins import scenario_loader as loader
@@ -19,7 +18,10 @@ def load_files(files_arg: str) -> List[pathlib.Path]:
     env_target = files_arg or os.environ.get("KEEPER_SCENARIO_FILE", "all")
     files = []
     if env_target.lower() in ("all", "auto", "*"):
-        files = sorted(p for p in SCN_BASE.glob("*.yaml") if p.name != "keeper_e2e.yaml")
+        files = sorted(
+            p for p in SCN_BASE.glob("*.yaml")
+            if p.name not in ("keeper_e2e.yaml", "e2e_unique.yaml")
+        )
     elif "," in env_target:
         files = [SCN_BASE / p.strip() for p in env_target.split(",") if p.strip()]
     else:
@@ -79,9 +81,6 @@ def main():
             if s.get("topology"): args_map.setdefault("topology", int(s.get("topology")))
             if s.get("backend"): args_map.setdefault("backend", s.get("backend"))
             s = fn(**args_map)
-        # Skip TLS-related scenarios entirely
-        if isinstance(s, dict) and loader.is_tls_scenario(s):
-            continue
         sid = s.get("id")
         if sid in seen:
             continue
