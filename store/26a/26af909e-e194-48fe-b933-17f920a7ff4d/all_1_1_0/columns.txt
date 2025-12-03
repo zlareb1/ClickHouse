@@ -1,0 +1,9 @@
+columns format version: 1
+7 columns:
+`timestamp` UInt32
+`SrcIp` UInt64
+`SrcPort` UInt16
+`DestIp` UInt64
+`DestPort` UInt16
+`SegmentValue` UInt8
+`FlowDirection` UInt8

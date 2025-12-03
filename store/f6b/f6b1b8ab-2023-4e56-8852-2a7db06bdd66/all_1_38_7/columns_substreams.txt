@@ -1,0 +1,76 @@
+columns substreams version: 1
+2 columns:
+71 substreams for column `d`:
+	d.dynamic_structure
+	d.variant_discr
+	d.LowCardinality(String).dict
+	d.LowCardinality(UInt16).dict
+	d.Map(Dynamic, Dynamic)%2Ekeys.dynamic_structure
+	d.Map(Dynamic, Dynamic)%2Ekeys.variant_discr
+	d.Map(Dynamic, Dynamic)%2Evalues.dynamic_structure
+	d.Map(Dynamic, Dynamic)%2Evalues.variant_discr
+	d.Tuple(Dynamic)%2E1.dynamic_structure
+	d.Tuple(Dynamic)%2E1.variant_discr
+	d.Tuple(Tuple(Dynamic))%2E1%2E1.dynamic_structure
+	d.Tuple(Tuple(Dynamic))%2E1%2E1.variant_discr
+	d.Tuple(Tuple(Tuple(Dynamic)))%2E1%2E1%2E1.dynamic_structure
+	d.Tuple(Tuple(Tuple(Dynamic)))%2E1%2E1%2E1.variant_discr
+	d.Bool
+	d.Float32
+	d.Float64
+	d.Int128
+	d.Int16
+	d.Int256
+	d.Int32
+	d.Int64
+	d.Int8
+	d.IntervalDay
+	d.IntervalMonth
+	d.IntervalYear
+	d.LowCardinality(String)
+	d.LowCardinality(UInt16)
+	d.Map(Dynamic, Dynamic).size0
+	d.Map(Dynamic, Dynamic)%2Ekeys.SharedVariant
+	d.Map(Dynamic, Dynamic)%2Ekeys.String
+	d.Map(Dynamic, Dynamic)%2Evalues.SharedVariant
+	d.Map(Dynamic, Dynamic)%2Evalues.String
+	d.MultiPolygon.size0
+	d.MultiPolygon.size1
+	d.MultiPolygon.size2
+	d.MultiPolygon%2E1
+	d.MultiPolygon%2E2
+	d.Nested(x UInt32, y String).size0
+	d.Nested(x UInt32, y String)%2Ex
+	d.Nested(x UInt32, y String)%2Ey
+	d.Nested(x UInt32, y Tuple(y1 UInt32, y2 Array(String)), z Nested(z1 UInt32, z2 String)).size0
+	d.Nested(x UInt32, y Tuple(y1 UInt32, y2 Array(String)), z Nested(z1 UInt32, z2 String))%2Ex
+	d.Nested(x UInt32, y Tuple(y1 UInt32, y2 Array(String)), z Nested(z1 UInt32, z2 String))%2Ey%2Ey1
+	d.Nested(x UInt32, y Tuple(y1 UInt32, y2 Array(String)), z Nested(z1 UInt32, z2 String))%2Ey%2Ey2.size1
+	d.Nested(x UInt32, y Tuple(y1 UInt32, y2 Array(String)), z Nested(z1 UInt32, z2 String))%2Ey%2Ey2
+	d.Nested(x UInt32, y Tuple(y1 UInt32, y2 Array(String)), z Nested(z1 UInt32, z2 String))%2Ez.size1
+	d.Nested(x UInt32, y Tuple(y1 UInt32, y2 Array(String)), z Nested(z1 UInt32, z2 String))%2Ez%2Ez1
+	d.Nested(x UInt32, y Tuple(y1 UInt32, y2 Array(String)), z Nested(z1 UInt32, z2 String))%2Ez%2Ez2
+	d.Point%2E1
+	d.Point%2E2
+	d.Ring.size0
+	d.Ring%2E1
+	d.Ring%2E2
+	d.SharedVariant
+	d.SimpleAggregateFunction(anyLast, Array(Int16)).size0
+	d.SimpleAggregateFunction(anyLast, Array(Int16))
+	d.String
+	d.Tuple(Dynamic)%2E1.SharedVariant
+	d.Tuple(Dynamic)%2E1.String
+	d.Tuple(Tuple(Dynamic))%2E1%2E1.SharedVariant
+	d.Tuple(Tuple(Dynamic))%2E1%2E1.String
+	d.Tuple(Tuple(Tuple(Dynamic)))%2E1%2E1%2E1.SharedVariant
+	d.Tuple(Tuple(Tuple(Dynamic)))%2E1%2E1%2E1.String
+	d.UInt128
+	d.UInt16
+	d.UInt256
+	d.UInt32
+	d.UInt64
+	d.UInt8
+	d.UUID
+1 substreams for column `_block_number`:
+	_block_number

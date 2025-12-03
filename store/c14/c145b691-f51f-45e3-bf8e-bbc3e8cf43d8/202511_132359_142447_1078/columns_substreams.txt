@@ -1,0 +1,84 @@
+columns substreams version: 1
+33 columns:
+2 substreams for column `hostname`:
+	hostname.dict
+	hostname
+1 substreams for column `type`:
+	type
+1 substreams for column `event_date`:
+	event_date
+1 substreams for column `event_time`:
+	event_time
+1 substreams for column `thread_id`:
+	thread_id
+2 substreams for column `query_id`:
+	query_id.size
+	query_id
+1 substreams for column `address`:
+	address
+1 substreams for column `port`:
+	port
+1 substreams for column `session_id`:
+	session_id
+1 substreams for column `duration_microseconds`:
+	duration_microseconds
+1 substreams for column `xid`:
+	xid
+2 substreams for column `has_watch`:
+	has_watch.sparse.idx
+	has_watch
+1 substreams for column `op_num`:
+	op_num
+2 substreams for column `path`:
+	path.size
+	path
+2 substreams for column `data`:
+	data.size
+	data
+2 substreams for column `is_ephemeral`:
+	is_ephemeral.sparse.idx
+	is_ephemeral
+2 substreams for column `is_sequential`:
+	is_sequential.sparse.idx
+	is_sequential
+2 substreams for column `version`:
+	version.null
+	version
+2 substreams for column `requests_size`:
+	requests_size.sparse.idx
+	requests_size
+2 substreams for column `request_idx`:
+	request_idx.sparse.idx
+	request_idx
+1 substreams for column `zxid`:
+	zxid
+2 substreams for column `error`:
+	error.null
+	error
+2 substreams for column `watch_type`:
+	watch_type.null
+	watch_type
+2 substreams for column `watch_state`:
+	watch_state.null
+	watch_state
+3 substreams for column `path_created`:
+	path_created.sparse.idx
+	path_created.size
+	path_created
+1 substreams for column `stat_czxid`:
+	stat_czxid
+1 substreams for column `stat_mzxid`:
+	stat_mzxid
+1 substreams for column `stat_pzxid`:
+	stat_pzxid
+1 substreams for column `stat_version`:
+	stat_version
+1 substreams for column `stat_cversion`:
+	stat_cversion
+1 substreams for column `stat_dataLength`:
+	stat_dataLength
+1 substreams for column `stat_numChildren`:
+	stat_numChildren
+2 substreams for column `children`:
+	children.size0
+	children

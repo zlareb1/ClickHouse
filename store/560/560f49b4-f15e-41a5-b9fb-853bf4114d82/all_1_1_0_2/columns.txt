@@ -1,0 +1,4 @@
+columns format version: 1
+2 columns:
+`k` UInt64
+`val` UInt64

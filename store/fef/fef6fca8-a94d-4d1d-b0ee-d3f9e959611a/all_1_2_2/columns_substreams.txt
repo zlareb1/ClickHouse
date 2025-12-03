@@ -1,0 +1,11 @@
+columns substreams version: 1
+2 columns:
+1 substreams for column `i`:
+	i
+6 substreams for column `d`:
+	d.dynamic_structure
+	d.variant_discr_prefix
+	d.variant_discr
+	d.FixedString(10)
+	d.FixedString(2)
+	d.SharedVariant

@@ -1,16 +1,15 @@
 import time, pathlib, pytest, json, uuid, yaml, copy
 import os, shutil
-from ..framework import faults as F
-from ..framework.faults import apply_step as apply_step_dispatcher
-from ..framework.workloads import KeeperBench, servers_arg
-from ..framework.probes import is_leader, count_leaders, mntr, lgif, prom_metrics, ch_metrics, ch_async_metrics
-from ..framework.prom_parse import parse_prometheus_text
-from ..framework.gates import single_leader, backlog_drains, error_rate_le, p99_le, watch_delta_within, no_watcher_hotspot, ephemerals_gone_within, ready_expect, lgif_monotone, apply_gate
-from ..framework.sink import sink_clickhouse
-from ..framework.monitors import MetricsSampler
-from ..framework.preflight import ensure_environment
+from ..faults import apply_step as apply_step_dispatcher
+from ..workloads import KeeperBench, servers_arg
+from ..framework.io import is_leader, count_leaders, mntr, lgif, prom_metrics, ch_metrics, ch_async_metrics
+from ..framework.io import parse_prometheus_text
+from ..gates import single_leader, backlog_drains, error_rate_le, p99_le, watch_delta_within, no_watcher_hotspot, ephemerals_gone_within, ready_expect, lgif_monotone, apply_gate
+from ..framework.io import sink_clickhouse
+from ..framework.metrics import MetricsSampler
+from ..framework.core.preflight import ensure_environment
 from ..framework.fuzz import generate_fuzz_scenario
-from ..framework.registry import fault_registry
+from ..framework.core.registry import fault_registry
 from ..framework.fuzz import _EXCLUDE as _FUZZ_EXCLUDE
 
 WORKDIR = pathlib.Path(__file__).parents[2]
@@ -29,7 +28,6 @@ def _snapshot_and_sink(nodes, stage, scenario_id, topo, run_meta, sink_url, run_
     snap_nodes = nodes
     if stage == "fail":
         try:
-            from ..framework.probes import is_leader
             leaders = [n for n in nodes if is_leader(n)]
             if leaders:
                 snap_nodes = leaders[:1]
@@ -251,14 +249,36 @@ def test_scenario(scenario, cluster_factory, request, run_meta):
         kb=None
         if faults_mode != "random" and "workload" in scenario:
             wl=scenario["workload"]
+            # Environment overrides for workload paths and bench clients
+            try:
+                rp = os.environ.get("KEEPER_REPLAY_PATH", "").strip()
+                if rp:
+                    wl = dict(wl or {})
+                    wl["replay"] = rp
+            except Exception:
+                pass
+            try:
+                wc = os.environ.get("KEEPER_WORKLOAD_CONFIG", "").strip()
+                if wc:
+                    wl = dict(wl or {})
+                    wl["config"] = wc
+            except Exception:
+                pass
+            clients_env = None
+            try:
+                ce = os.environ.get("KEEPER_BENCH_CLIENTS")
+                clients_env = int(ce) if ce not in (None, "") else None
+            except Exception:
+                clients_env = None
             secure = False
             kb=KeeperBench(
                 nodes[0],
                 servers_arg(nodes),
-                cfg_path=str(WORKDIR/wl["config"]) if wl.get("config") else None,
+                cfg_path=str(WORKDIR/wl.get("config")) if wl.get("config") else None,
                 duration_s=wl.get("duration", request.config.getoption("--duration")),
                 replay_path=wl.get("replay"),
                 secure=secure,
+                clients=clients_env,
             )
             ctx["workload"]=wl; ctx["bench_node"]=nodes[0]; ctx["bench_secure"]=secure; ctx["bench_servers"]=servers_arg(nodes)
         for action in fs_effective: _apply_step(action, nodes, leader, ctx)

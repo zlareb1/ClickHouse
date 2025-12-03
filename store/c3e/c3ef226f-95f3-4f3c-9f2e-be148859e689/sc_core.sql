@@ -1,0 +1,8 @@
+ATTACH TABLE _ UUID '2b014a87-12d7-4065-ae9d-70ac8f3c662f'
+(
+    `k` UInt32,
+    `v` Float64 STATISTICS(TDigest)
+)
+ENGINE = MergeTree
+ORDER BY k
+SETTINGS refresh_statistics_interval = 1, index_granularity = 25325, min_bytes_for_wide_part = 1073741824, ratio_of_defaults_for_sparse_serialization = 1., replace_long_file_name_to_hash = false, max_file_name_length = 0, min_bytes_for_full_part_storage = 446605155, compact_parts_max_bytes_to_buffer = 45229195, compact_parts_max_granules_to_buffer = 221, compact_parts_merge_max_bytes_to_prefetch_part = 10381, serialization_info_version = 'with_types', string_serialization_version = 'with_size_stream', object_serialization_version = 'v2', object_shared_data_serialization_version = 'advanced', object_shared_data_serialization_version_for_zero_level_parts = 'advanced', object_shared_data_buckets_for_compact_part = 8, object_shared_data_buckets_for_wide_part = 7, dynamic_serialization_version = 'v2', merge_max_block_size = 891, old_parts_lifetime = 476., prefer_fetch_merged_part_size_threshold = 1, vertical_merge_algorithm_min_rows_to_activate = 685511, vertical_merge_algorithm_min_columns_to_activate = 1, min_merge_bytes_to_use_direct_io = 2165422159, index_granularity_bytes = 30932209, use_const_adaptive_granularity = true, enable_index_granularity_compression = false, concurrent_part_removal_threshold = 100, allow_vertical_merges_from_compact_to_wide_parts = false, enable_block_number_column = true, enable_block_offset_column = false, auto_statistics_types = 'countmin,minmax,tdigest', cache_populated_by_fetch = true, marks_compress_block_size = 57057, primary_key_compress_block_size = 48738, use_primary_key_cache = true, prewarm_primary_key_cache = false, prewarm_mark_cache = false

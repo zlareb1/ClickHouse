@@ -1,0 +1,19 @@
+columns substreams version: 1
+6 columns:
+2 substreams for column `status`:
+	status.null
+	status
+3 substreams for column `_part`:
+	_part.dict_prefix
+	_part.dict
+	_part
+2 substreams for column `_part_offset`:
+	_part_offset.sparse.idx
+	_part_offset
+1 substreams for column `_part_data_version`:
+	_part_data_version
+1 substreams for column `_block_number`:
+	_block_number
+2 substreams for column `_block_offset`:
+	_block_offset.sparse.idx
+	_block_offset

@@ -1,0 +1,6 @@
+columns format version: 1
+4 columns:
+`k` UInt32
+`val` Nullable(Float64)
+`cat` LowCardinality(Nullable(String))
+`r` UInt32

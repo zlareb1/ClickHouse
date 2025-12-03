@@ -12,6 +12,7 @@ from .settings import (
     MINIO_ENDPOINT,
     MINIO_ACCESS_KEY,
     MINIO_SECRET_KEY,
+    parse_bool,
 )
 
 class ClusterBuilder:
@@ -22,10 +23,11 @@ class ClusterBuilder:
         peers = "\n".join(
             [f"        <server><id>{i}</id><hostname>{n}</hostname><port>{RAFT_PORT}</port></server>" for i, n in enumerate(names, start=start_sid)]
         )
+        # Only inject control endpoint when explicitly enabled to avoid failures on older images.
+        enable_ctrl = bool(CONTROL_PORT) and parse_bool(os.environ.get("KEEPER_ENABLE_CONTROL", "0"))
         http_ctrl = (
             f"<http_control><port>{CONTROL_PORT}</port><readiness><endpoint>/ready</endpoint></readiness></http_control>"
-            if CONTROL_PORT
-            else ""
+            if enable_ctrl else ""
         )
         return f"""<clickhouse>
   <keeper_server>

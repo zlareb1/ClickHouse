@@ -1,0 +1,11 @@
+columns substreams version: 1
+4 columns:
+1 substreams for column `k`:
+	k
+1 substreams for column `val`:
+	val
+2 substreams for column `cat`:
+	cat.size
+	cat
+1 substreams for column `r`:
+	r

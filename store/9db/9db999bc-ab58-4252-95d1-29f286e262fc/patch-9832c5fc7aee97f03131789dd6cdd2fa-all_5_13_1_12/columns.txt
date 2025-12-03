@@ -1,0 +1,8 @@
+columns format version: 1
+6 columns:
+`lock_time` Nullable(DateTime)
+`_part` LowCardinality(String)
+`_part_offset` UInt64
+`_part_data_version` UInt64
+`_block_number` UInt64
+`_block_offset` UInt64

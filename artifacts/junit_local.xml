@@ -1,0 +1,2942 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="9" skipped="0" tests="10" time="2681.912" timestamp="2025-12-01T11:15:07.439370+00:00" hostname="ip-10-2-3-62"><testcase classname="tests.stress.keeper.tests.test_scenarios" name="test_scenario[CHA-01[default|t3]]" time="219.856"><failure message="AssertionError: dm_delay: mount failed: Command [docker exec -u root --privileged ubuntutestscha01defaultt3local0c2e3044-keeper1-1 bash -lc export PATH=&quot;$PATH:/usr/sbin:/sbin&quot;; mount -t ext4 -o rw,nodelalloc,data=writeback,noatime /dev/mapper/kdelay_keeper1 /mnt/kdelay_keeper1] return non-zero code 32: mount: /mnt/kdelay_keeper1: cannot mount; probably corrupted filesystem on /dev/mapper/kdelay_keeper1.">node = &lt;helpers.cluster.ClickHouseInstance object at 0xfa1d3ef6d2b0&gt;
+ms = 3
+
+    @contextmanager
+    def dm_delay(node, ms=3):
+        try:
+            suffix = getattr(node, "name", "node")
+            dm_name = f"kdelay_{suffix}"
+            img = f"/var/lib/keeper_delay_{suffix}.img"
+            backend_dev = ""
+            # Prefer RAM block device if present inside container
+            ram = sh(node, "ls -1 /dev/ram* 2&gt;/dev/null | head -n1 || true")['out'].strip()
+            if ram:
+                backend_dev = ram
+            else:
+                sh_root(node, f"rm -f {img} || true")
+                sh_root(node, f"dd if=/dev/zero of={img} bs=1M count=256")
+                # Ensure prior loop for this image is detached
+                sh_root(node, f"LOOP=$(losetup -j {img} | cut -d: -f1); [ -n \"$LOOP\" ] &amp;&amp; losetup -d $LOOP || true")
+                lo = sh_root(node, f"losetup -f --show {img}")['out'].strip()
+                backend_dev = lo
+            if not backend_dev:
+                if STRICT_FAULTS:
+                    raise AssertionError("dm_delay: cannot create loop device")
+                yield
+                return
+            sz = sh_root(node, f"blockdev --getsz {backend_dev}")['out'].strip()
+            sh_root(node, "umount /var/lib/clickhouse/coordination || true")
+            sh_root(node, f"dmsetup remove --retry -f {dm_name} || true")
+            sh(node, f"i=0; while dmsetup info {dm_name} &gt;/dev/null 2&gt;&amp;1 &amp;&amp; [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done")
+            sh_root(node, f"dmsetup create {dm_name} --table '0 {sz} delay {backend_dev} 0 {ms} {backend_dev} 0 {ms}'")
+            try:
+                sh(node, "pkill -STOP -x clickhouse || pkill -STOP clickhouse-server || true")
+                sh_root(node, f"dmsetup mknodes {dm_name} || dmsetup mknodes")
+                sh(node, f"i=0; while [ ! -e /dev/mapper/{dm_name} ] &amp;&amp; [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done; [ -e /dev/mapper/{dm_name} ] &amp;&amp; echo ok || (dmsetup info {dm_name} &amp;&amp; false)")
+                sh_root(node, "umount /var/lib/clickhouse/coordination || true")
+                sh_root(node, f"mkdir -p /var/lib/clickhouse/coordination /mnt/{dm_name} || true")
+                sh_root(node, f"wipefs -a /dev/mapper/{dm_name} || true")
+                sh_root(node, f"mkfs.ext4 -E nodiscard,lazy_itable_init=0,lazy_journal_init=0 -F /dev/mapper/{dm_name}")
+                sh_root(node, "sync || true; (command -v udevadm &gt;/dev/null 2&gt;&amp;1 &amp;&amp; udevadm settle) || true")
+                sh(node, f"i=0; while ! blkid /dev/mapper/{dm_name} &gt;/dev/null 2&gt;&amp;1 &amp;&amp; [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done")
+                sh(node, "sleep 0.3")
+&gt;               sh_root(node, f"mount -t ext4 -o rw,nodelalloc,data=writeback,noatime /dev/mapper/{dm_name} /mnt/{dm_name}")
+
+tests/stress/keeper/framework/faults_disk.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/stress/keeper/framework/util.py:7: in sh_root
+    return sh(node, f"export PATH=\"$PATH:/usr/sbin:/sbin\"; {cmd}", timeout=timeout, user="root", privileged=True)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/util.py:4: in sh
+    out = node.exec_in_container(["bash","-lc",cmd], attach=True, timeout=timeout, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/integration/helpers/cluster.py:4775: in exec_in_container
+    return self.cluster.exec_in_container(
+tests/integration/helpers/cluster.py:2458: in exec_in_container
+    result = subprocess_check_call(
+tests/integration/helpers/cluster.py:294: in subprocess_check_call
+    return run_and_check(args, detach=detach, nothrow=nothrow, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ['docker', 'exec', '-u', 'root', '--privileged', 'ubuntutestscha01defaultt3local0c2e3044-keeper1-1', ...]
+env = None, shell = False, stdout = -1, stderr = -1, timeout = 300
+nothrow = False, detach = False
+
+    def run_and_check(
+        args: Union[Sequence[str], str],
+        env=None,
+        shell=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=300,
+        nothrow=False,
+        detach=False,
+    ) -&gt; str:
+        if shell:
+            if isinstance(args, str):
+                shell_args = args
+            else:
+                shell_args = next(a for a in args)
+        else:
+            shell_args = " ".join(args)
+    
+        logging.debug("Command:[%s]", shell_args)
+        if detach:
+            subprocess.Popen(
+                args,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                shell=shell,
+            )
+            return ""
+    
+        res = subprocess.run(
+            args,
+            stdout=stdout,
+            stderr=stderr,
+            env=env,
+            shell=shell,
+            timeout=timeout,
+            check=False,
+        )
+        out = res.stdout.decode("utf-8", "ignore")
+        err = res.stderr.decode("utf-8", "ignore")
+        # check_call(...) from subprocess does not print stderr, so we do it manually
+        for outline in out.splitlines():
+            logging.debug("Stdout:%s", outline)
+        for errline in err.splitlines():
+            logging.debug("Stderr:%s", errline)
+        if res.returncode != 0:
+            logging.debug("Exitcode:%s", res.returncode)
+            if env:
+                logging.debug("Env:%s", env)
+            if not nothrow:
+&gt;               raise Exception(
+                    f"Command [{shell_args}] return non-zero code {res.returncode}: {res.stderr.decode('utf-8')}"
+                )
+E               Exception: Command [docker exec -u root --privileged ubuntutestscha01defaultt3local0c2e3044-keeper1-1 bash -lc export PATH="$PATH:/usr/sbin:/sbin"; mount -t ext4 -o rw,nodelalloc,data=writeback,noatime /dev/mapper/kdelay_keeper1 /mnt/kdelay_keeper1] return non-zero code 32: mount: /mnt/kdelay_keeper1: cannot mount; probably corrupted filesystem on /dev/mapper/kdelay_keeper1.
+
+tests/integration/helpers/cluster.py:191: Exception
+
+During handling of the above exception, another exception occurred:
+
+scenario = {'backend': 'default', 'faults': [{'delay_ms': 10, 'duration_s': 180, 'jitter_ms': 5, 'kind': 'netem', ...}, {'duratio...ate_le'}, {'type': 'p99_le'}, {'type': 'log_sanity_ok'}, {'type': 'health_precheck'}], 'id': 'CHA-01[default|t3]', ...}
+cluster_factory = &lt;function cluster_factory.&lt;locals&gt;._make at 0xfa1d3cb049a0&gt;
+request = &lt;FixtureRequest for &lt;Function test_scenario[CHA-01[default|t3]]&gt;&gt;
+run_meta = {'backend': 'default', 'commit_sha': 'local'}
+
+    @pytest.mark.timeout(2400)
+    def test_scenario(scenario, cluster_factory, request, run_meta):
+        start_ts = time.time()
+        topo=scenario.get("topology",3)
+        flags=scenario.get("keeper_flags_xml","")
+        backend = scenario.get("backend") or request.config.getoption("--keeper-backend")
+        # Effective run_meta per test with the scenario-selected backend
+        run_meta_eff = dict(run_meta or {})
+        try:
+            run_meta_eff["backend"] = backend
+        except Exception:
+            pass
+        opts=scenario.get("opts", {})
+        try:
+            faults_mode = request.config.getoption("--faults")
+        except Exception:
+            faults_mode = os.environ.get("KEEPER_FAULTS", "on")
+        try:
+            rnd_count = int(request.config.getoption("--random-faults-count") or 1)
+        except Exception:
+            rnd_count = int(os.environ.get("KEEPER_RANDOM_FAULTS_COUNT", "1"))
+        try:
+            seed_val = int(request.config.getoption("--seed") or 0)
+        except Exception:
+            seed_val = 0
+        fs_original = scenario.get("faults", []) or []
+        fs_effective = fs_original
+        if faults_mode == "off":
+            fs_effective = []
+        elif faults_mode == "random":
+            try:
+                dur_default = int((scenario.get("workload") or {}).get("duration") or request.config.getoption("--duration"))
+            except Exception:
+                dur_default = int(os.environ.get("KEEPER_DURATION", "120"))
+            if seed_val &lt;= 0:
+                import os as _os
+                seed_val = int.from_bytes(_os.urandom(4), 'big')
+            try:
+                try:
+                    inc_raw = request.config.getoption("--random-faults-include") or os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                except Exception:
+                    inc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                try:
+                    exc_raw = request.config.getoption("--random-faults-exclude") or os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                except Exception:
+                    exc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                inc = set([x.strip() for x in (inc_raw or "").split(",") if x.strip()])
+                exc = set([x.strip() for x in (exc_raw or "").split(",") if x.strip()])
+                cands = [k for k in list(getattr(fault_registry, 'keys', lambda: [])()) if k not in _FUZZ_EXCLUDE]
+                if not cands and isinstance(fault_registry, dict):
+                    cands = [k for k in fault_registry.keys() if k not in _FUZZ_EXCLUDE]
+                weights = {}
+                if inc:
+                    for k in cands:
+                        weights[k] = 1 if k in inc else 0
+                else:
+                    for k in cands:
+                        weights[k] = 0 if k in exc else 1
+                fz = generate_fuzz_scenario(seed_val, max(1, rnd_count), dur_default, weights=weights)
+                rnd_faults = fz.get("faults", []) or []
+                rb = {"kind": "run_bench", "duration_s": dur_default}
+                fs_effective = [{"kind": "parallel", "steps": [rb] + rnd_faults}]
+            except Exception:
+                fs_effective = fs_original
+        try:
+            uses_dm = any((f.get("kind") in ("dm_delay","dm_error")) for f in fs_effective)
+            if uses_dm:
+                os.environ.setdefault("KEEPER_PRIVILEGED", "1")
+                os.environ.setdefault("KEEPER_HOST_AUTO_PROVISION", "1")
+            # Relax log gate for known transient errors during chaos if not provided by env
+            os.environ.setdefault(
+                "KEEPER_LOG_ALLOW",
+                "failed to read rpc header.*End of file|DNS error|Not found address of host|Net Exception: Socket is not connected|CANNOT_READ_ALL_DATA|Cannot read all data|Unknown table.*system\\.trace_log|Unknown table expression identifier 'system\\.trace_log'"
+            )
+        except Exception:
+            pass
+        # compute run_id early for reproducible artifact paths
+        run_id=f"{scenario.get('id','')}-{run_meta.get('commit_sha','local')}-{uuid.uuid4().hex[:8]}"
+        # Use a unique cluster name per test to avoid instance-dir collisions
+        try:
+            cname = run_id.replace('/', '_').replace(' ', '_')
+            os.environ["KEEPER_CLUSTER_NAME"] = cname
+        except Exception:
+            pass
+        cluster, nodes = cluster_factory(topo, backend, opts)
+        summary={}; ctx={}
+        try:
+            try:
+                scenario_for_env = copy.deepcopy(scenario)
+                scenario_for_env["faults"] = fs_effective
+            except Exception:
+                scenario_for_env = scenario
+            ensure_environment(nodes, scenario_for_env)
+            single_leader(nodes)
+            leader=[n for n in nodes if is_leader(n)][0]
+            sink_url=request.config.getoption("--sink-url")
+            _snapshot_and_sink(nodes, "pre", scenario.get("id",""), topo, run_meta_eff, sink_url, run_id)
+            ctx["cluster"] = cluster
+            try:
+                ctx["faults_mode"] = request.config.getoption("--faults")
+            except Exception:
+                ctx["faults_mode"] = ctx.get("faults_mode", "on")
+            try:
+                ctx["log_allow"] = request.config.getoption("--log-allow") or ""
+            except Exception:
+                ctx["log_allow"] = ctx.get("log_allow", "")
+            # propagate seed if provided
+            try:
+                ctx["seed"] = int(request.config.getoption("--seed") or 0)
+            except Exception:
+                ctx["seed"] = 0
+            sampler=None
+            if sink_url:
+                interval=int(opts.get("monitor_interval_s", 5)) if isinstance(opts, dict) else 5
+                prom_allow = opts.get("prom_allow_prefixes") if isinstance(opts, dict) else None
+                sampler=MetricsSampler(nodes, run_meta_eff, scenario.get("id",""), topo, sink_url=sink_url, interval_s=interval, stage_prefix="run", run_id=run_id, prom_allow_prefixes=prom_allow, ctx=ctx)
+                sampler.start()
+            for step in scenario.get("pre", []): _apply_step(step, nodes, leader, ctx)
+            kb=None
+            if faults_mode != "random" and "workload" in scenario:
+                wl=scenario["workload"]
+                secure = False
+                kb=KeeperBench(
+                    nodes[0],
+                    servers_arg(nodes),
+                    cfg_path=str(WORKDIR/wl["config"]) if wl.get("config") else None,
+                    duration_s=wl.get("duration", request.config.getoption("--duration")),
+                    replay_path=wl.get("replay"),
+                    secure=secure,
+                )
+                ctx["workload"]=wl; ctx["bench_node"]=nodes[0]; ctx["bench_secure"]=secure; ctx["bench_servers"]=servers_arg(nodes)
+&gt;           for action in fs_effective: _apply_step(action, nodes, leader, ctx)
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/stress/keeper/tests/test_scenarios.py:274: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/stress/keeper/tests/test_scenarios.py:19: in _apply_step
+    apply_step_dispatcher(step, nodes, leader, ctx)
+tests/stress/keeper/framework/faults.py:174: in apply_step
+    return fault_registry[kind](ctx, nodes, leader, step)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/faults.py:256: in _f_dm_delay
+    return impl(ctx, nodes, leader, step)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/faults_disk.py:153: in _f_dm_delay
+    _for_each_target(step, nodes, leader, _run_one)
+tests/stress/keeper/framework/faults_disk.py:27: in _for_each_target
+    raise errors[0]
+tests/stress/keeper/framework/faults_disk.py:17: in _wrap
+    run_one(t)
+tests/stress/keeper/framework/faults_disk.py:150: in _run_one
+    with dm_delay(t, step.get("ms", 3)):
+/usr/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+node = &lt;helpers.cluster.ClickHouseInstance object at 0xfa1d3ef6d2b0&gt;
+ms = 3
+
+    @contextmanager
+    def dm_delay(node, ms=3):
+        try:
+            suffix = getattr(node, "name", "node")
+            dm_name = f"kdelay_{suffix}"
+            img = f"/var/lib/keeper_delay_{suffix}.img"
+            backend_dev = ""
+            # Prefer RAM block device if present inside container
+            ram = sh(node, "ls -1 /dev/ram* 2&gt;/dev/null | head -n1 || true")['out'].strip()
+            if ram:
+                backend_dev = ram
+            else:
+                sh_root(node, f"rm -f {img} || true")
+                sh_root(node, f"dd if=/dev/zero of={img} bs=1M count=256")
+                # Ensure prior loop for this image is detached
+                sh_root(node, f"LOOP=$(losetup -j {img} | cut -d: -f1); [ -n \"$LOOP\" ] &amp;&amp; losetup -d $LOOP || true")
+                lo = sh_root(node, f"losetup -f --show {img}")['out'].strip()
+                backend_dev = lo
+            if not backend_dev:
+                if STRICT_FAULTS:
+                    raise AssertionError("dm_delay: cannot create loop device")
+                yield
+                return
+            sz = sh_root(node, f"blockdev --getsz {backend_dev}")['out'].strip()
+            sh_root(node, "umount /var/lib/clickhouse/coordination || true")
+            sh_root(node, f"dmsetup remove --retry -f {dm_name} || true")
+            sh(node, f"i=0; while dmsetup info {dm_name} &gt;/dev/null 2&gt;&amp;1 &amp;&amp; [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done")
+            sh_root(node, f"dmsetup create {dm_name} --table '0 {sz} delay {backend_dev} 0 {ms} {backend_dev} 0 {ms}'")
+            try:
+                sh(node, "pkill -STOP -x clickhouse || pkill -STOP clickhouse-server || true")
+                sh_root(node, f"dmsetup mknodes {dm_name} || dmsetup mknodes")
+                sh(node, f"i=0; while [ ! -e /dev/mapper/{dm_name} ] &amp;&amp; [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done; [ -e /dev/mapper/{dm_name} ] &amp;&amp; echo ok || (dmsetup info {dm_name} &amp;&amp; false)")
+                sh_root(node, "umount /var/lib/clickhouse/coordination || true")
+                sh_root(node, f"mkdir -p /var/lib/clickhouse/coordination /mnt/{dm_name} || true")
+                sh_root(node, f"wipefs -a /dev/mapper/{dm_name} || true")
+                sh_root(node, f"mkfs.ext4 -E nodiscard,lazy_itable_init=0,lazy_journal_init=0 -F /dev/mapper/{dm_name}")
+                sh_root(node, "sync || true; (command -v udevadm &gt;/dev/null 2&gt;&amp;1 &amp;&amp; udevadm settle) || true")
+                sh(node, f"i=0; while ! blkid /dev/mapper/{dm_name} &gt;/dev/null 2&gt;&amp;1 &amp;&amp; [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done")
+                sh(node, "sleep 0.3")
+                sh_root(node, f"mount -t ext4 -o rw,nodelalloc,data=writeback,noatime /dev/mapper/{dm_name} /mnt/{dm_name}")
+                sh_root(node, f"mount --bind /mnt/{dm_name} /var/lib/clickhouse/coordination")
+            except Exception as e:
+                if STRICT_FAULTS:
+&gt;                   raise AssertionError(f"dm_delay: mount failed: {e}")
+E                   AssertionError: dm_delay: mount failed: Command [docker exec -u root --privileged ubuntutestscha01defaultt3local0c2e3044-keeper1-1 bash -lc export PATH="$PATH:/usr/sbin:/sbin"; mount -t ext4 -o rw,nodelalloc,data=writeback,noatime /dev/mapper/kdelay_keeper1 /mnt/kdelay_keeper1] return non-zero code 32: mount: /mnt/kdelay_keeper1: cannot mount; probably corrupted filesystem on /dev/mapper/kdelay_keeper1.
+
+tests/stress/keeper/framework/faults_disk.py:76: AssertionError</failure></testcase><testcase classname="tests.stress.keeper.tests.test_scenarios" name="test_scenario[CHA-01[rocksdb|t3]]" time="216.419"><failure message="AssertionError: dm_delay: mount failed: Command [docker exec -u root --privileged ubuntutestscha01rocksdbt3localc663e771-keeper2-1 bash -lc export PATH=&quot;$PATH:/usr/sbin:/sbin&quot;; mount -t ext4 -o rw,nodelalloc,data=writeback,noatime /dev/mapper/kdelay_keeper2 /mnt/kdelay_keeper2] return non-zero code 32: mount: /mnt/kdelay_keeper2: cannot mount; probably corrupted filesystem on /dev/mapper/kdelay_keeper2.">node = &lt;helpers.cluster.ClickHouseInstance object at 0xfa1d370aebd0&gt;
+ms = 3
+
+    @contextmanager
+    def dm_delay(node, ms=3):
+        try:
+            suffix = getattr(node, "name", "node")
+            dm_name = f"kdelay_{suffix}"
+            img = f"/var/lib/keeper_delay_{suffix}.img"
+            backend_dev = ""
+            # Prefer RAM block device if present inside container
+            ram = sh(node, "ls -1 /dev/ram* 2&gt;/dev/null | head -n1 || true")['out'].strip()
+            if ram:
+                backend_dev = ram
+            else:
+                sh_root(node, f"rm -f {img} || true")
+                sh_root(node, f"dd if=/dev/zero of={img} bs=1M count=256")
+                # Ensure prior loop for this image is detached
+                sh_root(node, f"LOOP=$(losetup -j {img} | cut -d: -f1); [ -n \"$LOOP\" ] &amp;&amp; losetup -d $LOOP || true")
+                lo = sh_root(node, f"losetup -f --show {img}")['out'].strip()
+                backend_dev = lo
+            if not backend_dev:
+                if STRICT_FAULTS:
+                    raise AssertionError("dm_delay: cannot create loop device")
+                yield
+                return
+            sz = sh_root(node, f"blockdev --getsz {backend_dev}")['out'].strip()
+            sh_root(node, "umount /var/lib/clickhouse/coordination || true")
+            sh_root(node, f"dmsetup remove --retry -f {dm_name} || true")
+            sh(node, f"i=0; while dmsetup info {dm_name} &gt;/dev/null 2&gt;&amp;1 &amp;&amp; [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done")
+            sh_root(node, f"dmsetup create {dm_name} --table '0 {sz} delay {backend_dev} 0 {ms} {backend_dev} 0 {ms}'")
+            try:
+                sh(node, "pkill -STOP -x clickhouse || pkill -STOP clickhouse-server || true")
+                sh_root(node, f"dmsetup mknodes {dm_name} || dmsetup mknodes")
+                sh(node, f"i=0; while [ ! -e /dev/mapper/{dm_name} ] &amp;&amp; [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done; [ -e /dev/mapper/{dm_name} ] &amp;&amp; echo ok || (dmsetup info {dm_name} &amp;&amp; false)")
+                sh_root(node, "umount /var/lib/clickhouse/coordination || true")
+                sh_root(node, f"mkdir -p /var/lib/clickhouse/coordination /mnt/{dm_name} || true")
+                sh_root(node, f"wipefs -a /dev/mapper/{dm_name} || true")
+                sh_root(node, f"mkfs.ext4 -E nodiscard,lazy_itable_init=0,lazy_journal_init=0 -F /dev/mapper/{dm_name}")
+                sh_root(node, "sync || true; (command -v udevadm &gt;/dev/null 2&gt;&amp;1 &amp;&amp; udevadm settle) || true")
+                sh(node, f"i=0; while ! blkid /dev/mapper/{dm_name} &gt;/dev/null 2&gt;&amp;1 &amp;&amp; [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done")
+                sh(node, "sleep 0.3")
+&gt;               sh_root(node, f"mount -t ext4 -o rw,nodelalloc,data=writeback,noatime /dev/mapper/{dm_name} /mnt/{dm_name}")
+
+tests/stress/keeper/framework/faults_disk.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/stress/keeper/framework/util.py:7: in sh_root
+    return sh(node, f"export PATH=\"$PATH:/usr/sbin:/sbin\"; {cmd}", timeout=timeout, user="root", privileged=True)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/util.py:4: in sh
+    out = node.exec_in_container(["bash","-lc",cmd], attach=True, timeout=timeout, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/integration/helpers/cluster.py:4775: in exec_in_container
+    return self.cluster.exec_in_container(
+tests/integration/helpers/cluster.py:2458: in exec_in_container
+    result = subprocess_check_call(
+tests/integration/helpers/cluster.py:294: in subprocess_check_call
+    return run_and_check(args, detach=detach, nothrow=nothrow, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ['docker', 'exec', '-u', 'root', '--privileged', 'ubuntutestscha01rocksdbt3localc663e771-keeper2-1', ...]
+env = None, shell = False, stdout = -1, stderr = -1, timeout = 300
+nothrow = False, detach = False
+
+    def run_and_check(
+        args: Union[Sequence[str], str],
+        env=None,
+        shell=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=300,
+        nothrow=False,
+        detach=False,
+    ) -&gt; str:
+        if shell:
+            if isinstance(args, str):
+                shell_args = args
+            else:
+                shell_args = next(a for a in args)
+        else:
+            shell_args = " ".join(args)
+    
+        logging.debug("Command:[%s]", shell_args)
+        if detach:
+            subprocess.Popen(
+                args,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                shell=shell,
+            )
+            return ""
+    
+        res = subprocess.run(
+            args,
+            stdout=stdout,
+            stderr=stderr,
+            env=env,
+            shell=shell,
+            timeout=timeout,
+            check=False,
+        )
+        out = res.stdout.decode("utf-8", "ignore")
+        err = res.stderr.decode("utf-8", "ignore")
+        # check_call(...) from subprocess does not print stderr, so we do it manually
+        for outline in out.splitlines():
+            logging.debug("Stdout:%s", outline)
+        for errline in err.splitlines():
+            logging.debug("Stderr:%s", errline)
+        if res.returncode != 0:
+            logging.debug("Exitcode:%s", res.returncode)
+            if env:
+                logging.debug("Env:%s", env)
+            if not nothrow:
+&gt;               raise Exception(
+                    f"Command [{shell_args}] return non-zero code {res.returncode}: {res.stderr.decode('utf-8')}"
+                )
+E               Exception: Command [docker exec -u root --privileged ubuntutestscha01rocksdbt3localc663e771-keeper2-1 bash -lc export PATH="$PATH:/usr/sbin:/sbin"; mount -t ext4 -o rw,nodelalloc,data=writeback,noatime /dev/mapper/kdelay_keeper2 /mnt/kdelay_keeper2] return non-zero code 32: mount: /mnt/kdelay_keeper2: cannot mount; probably corrupted filesystem on /dev/mapper/kdelay_keeper2.
+
+tests/integration/helpers/cluster.py:191: Exception
+
+During handling of the above exception, another exception occurred:
+
+scenario = {'backend': 'rocksdb', 'faults': [{'delay_ms': 10, 'duration_s': 180, 'jitter_ms': 5, 'kind': 'netem', ...}, {'duratio...ate_le'}, {'type': 'p99_le'}, {'type': 'log_sanity_ok'}, {'type': 'health_precheck'}], 'id': 'CHA-01[rocksdb|t3]', ...}
+cluster_factory = &lt;function cluster_factory.&lt;locals&gt;._make at 0xfa1d36ed6660&gt;
+request = &lt;FixtureRequest for &lt;Function test_scenario[CHA-01[rocksdb|t3]]&gt;&gt;
+run_meta = {'backend': 'default', 'commit_sha': 'local'}
+
+    @pytest.mark.timeout(2400)
+    def test_scenario(scenario, cluster_factory, request, run_meta):
+        start_ts = time.time()
+        topo=scenario.get("topology",3)
+        flags=scenario.get("keeper_flags_xml","")
+        backend = scenario.get("backend") or request.config.getoption("--keeper-backend")
+        # Effective run_meta per test with the scenario-selected backend
+        run_meta_eff = dict(run_meta or {})
+        try:
+            run_meta_eff["backend"] = backend
+        except Exception:
+            pass
+        opts=scenario.get("opts", {})
+        try:
+            faults_mode = request.config.getoption("--faults")
+        except Exception:
+            faults_mode = os.environ.get("KEEPER_FAULTS", "on")
+        try:
+            rnd_count = int(request.config.getoption("--random-faults-count") or 1)
+        except Exception:
+            rnd_count = int(os.environ.get("KEEPER_RANDOM_FAULTS_COUNT", "1"))
+        try:
+            seed_val = int(request.config.getoption("--seed") or 0)
+        except Exception:
+            seed_val = 0
+        fs_original = scenario.get("faults", []) or []
+        fs_effective = fs_original
+        if faults_mode == "off":
+            fs_effective = []
+        elif faults_mode == "random":
+            try:
+                dur_default = int((scenario.get("workload") or {}).get("duration") or request.config.getoption("--duration"))
+            except Exception:
+                dur_default = int(os.environ.get("KEEPER_DURATION", "120"))
+            if seed_val &lt;= 0:
+                import os as _os
+                seed_val = int.from_bytes(_os.urandom(4), 'big')
+            try:
+                try:
+                    inc_raw = request.config.getoption("--random-faults-include") or os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                except Exception:
+                    inc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                try:
+                    exc_raw = request.config.getoption("--random-faults-exclude") or os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                except Exception:
+                    exc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                inc = set([x.strip() for x in (inc_raw or "").split(",") if x.strip()])
+                exc = set([x.strip() for x in (exc_raw or "").split(",") if x.strip()])
+                cands = [k for k in list(getattr(fault_registry, 'keys', lambda: [])()) if k not in _FUZZ_EXCLUDE]
+                if not cands and isinstance(fault_registry, dict):
+                    cands = [k for k in fault_registry.keys() if k not in _FUZZ_EXCLUDE]
+                weights = {}
+                if inc:
+                    for k in cands:
+                        weights[k] = 1 if k in inc else 0
+                else:
+                    for k in cands:
+                        weights[k] = 0 if k in exc else 1
+                fz = generate_fuzz_scenario(seed_val, max(1, rnd_count), dur_default, weights=weights)
+                rnd_faults = fz.get("faults", []) or []
+                rb = {"kind": "run_bench", "duration_s": dur_default}
+                fs_effective = [{"kind": "parallel", "steps": [rb] + rnd_faults}]
+            except Exception:
+                fs_effective = fs_original
+        try:
+            uses_dm = any((f.get("kind") in ("dm_delay","dm_error")) for f in fs_effective)
+            if uses_dm:
+                os.environ.setdefault("KEEPER_PRIVILEGED", "1")
+                os.environ.setdefault("KEEPER_HOST_AUTO_PROVISION", "1")
+            # Relax log gate for known transient errors during chaos if not provided by env
+            os.environ.setdefault(
+                "KEEPER_LOG_ALLOW",
+                "failed to read rpc header.*End of file|DNS error|Not found address of host|Net Exception: Socket is not connected|CANNOT_READ_ALL_DATA|Cannot read all data|Unknown table.*system\\.trace_log|Unknown table expression identifier 'system\\.trace_log'"
+            )
+        except Exception:
+            pass
+        # compute run_id early for reproducible artifact paths
+        run_id=f"{scenario.get('id','')}-{run_meta.get('commit_sha','local')}-{uuid.uuid4().hex[:8]}"
+        # Use a unique cluster name per test to avoid instance-dir collisions
+        try:
+            cname = run_id.replace('/', '_').replace(' ', '_')
+            os.environ["KEEPER_CLUSTER_NAME"] = cname
+        except Exception:
+            pass
+        cluster, nodes = cluster_factory(topo, backend, opts)
+        summary={}; ctx={}
+        try:
+            try:
+                scenario_for_env = copy.deepcopy(scenario)
+                scenario_for_env["faults"] = fs_effective
+            except Exception:
+                scenario_for_env = scenario
+            ensure_environment(nodes, scenario_for_env)
+            single_leader(nodes)
+            leader=[n for n in nodes if is_leader(n)][0]
+            sink_url=request.config.getoption("--sink-url")
+            _snapshot_and_sink(nodes, "pre", scenario.get("id",""), topo, run_meta_eff, sink_url, run_id)
+            ctx["cluster"] = cluster
+            try:
+                ctx["faults_mode"] = request.config.getoption("--faults")
+            except Exception:
+                ctx["faults_mode"] = ctx.get("faults_mode", "on")
+            try:
+                ctx["log_allow"] = request.config.getoption("--log-allow") or ""
+            except Exception:
+                ctx["log_allow"] = ctx.get("log_allow", "")
+            # propagate seed if provided
+            try:
+                ctx["seed"] = int(request.config.getoption("--seed") or 0)
+            except Exception:
+                ctx["seed"] = 0
+            sampler=None
+            if sink_url:
+                interval=int(opts.get("monitor_interval_s", 5)) if isinstance(opts, dict) else 5
+                prom_allow = opts.get("prom_allow_prefixes") if isinstance(opts, dict) else None
+                sampler=MetricsSampler(nodes, run_meta_eff, scenario.get("id",""), topo, sink_url=sink_url, interval_s=interval, stage_prefix="run", run_id=run_id, prom_allow_prefixes=prom_allow, ctx=ctx)
+                sampler.start()
+            for step in scenario.get("pre", []): _apply_step(step, nodes, leader, ctx)
+            kb=None
+            if faults_mode != "random" and "workload" in scenario:
+                wl=scenario["workload"]
+                secure = False
+                kb=KeeperBench(
+                    nodes[0],
+                    servers_arg(nodes),
+                    cfg_path=str(WORKDIR/wl["config"]) if wl.get("config") else None,
+                    duration_s=wl.get("duration", request.config.getoption("--duration")),
+                    replay_path=wl.get("replay"),
+                    secure=secure,
+                )
+                ctx["workload"]=wl; ctx["bench_node"]=nodes[0]; ctx["bench_secure"]=secure; ctx["bench_servers"]=servers_arg(nodes)
+            for action in fs_effective: _apply_step(action, nodes, leader, ctx)
+            if kb:
+                summary = kb.run()
+            elif ctx.get("bench_summary"):
+                summary = ctx.get("bench_summary") or {}
+            for gate in scenario.get("gates", []): _apply_gate(gate, nodes, leader, ctx, summary)
+            if sink_url:
+                run_row={
+                    "run_id": run_id,
+                    "commit_sha": run_meta_eff.get("commit_sha","local"),
+                    "backend": backend,
+                    "scenario": scenario.get("id",""),
+                    "topology": topo,
+                    "summary_json": json.dumps(summary),
+                }
+                sink_clickhouse(sink_url, "keeper_bench_runs", [run_row])
+            _snapshot_and_sink(nodes, "post", scenario.get("id",""), topo, run_meta_eff, sink_url, run_id)
+            try:
+                from ci.praktika.cidb import CIDB
+                from ci.praktika.settings import Settings
+                from ci.praktika.info import Info
+                info = Info()
+                url_secret = info.get_secret(Settings.SECRET_CI_DB_URL)
+                user_secret = info.get_secret(Settings.SECRET_CI_DB_USER)
+                passwd_secret = info.get_secret(Settings.SECRET_CI_DB_PASSWORD)
+                url_w = user_w = pwd_w = None
+                if url_secret and user_secret and passwd_secret:
+                    url_w, user_w, pwd_w = url_secret.join_with(user_secret).join_with(passwd_secret).get_value()
+                else:
+                    try:
+                        url_w = os.environ.get("KEEPER_CIDB_URL", "").strip()
+                        user_w = os.environ.get("KEEPER_CIDB_USER", "").strip()
+                        pwd_w = os.environ.get("KEEPER_CIDB_PASSWORD", "").strip()
+                    except Exception:
+                        url_w = user_w = pwd_w = None
+                if url_w and user_w and pwd_w:
+                    if getattr(Settings, "KEEPER_CI_DB_DB_NAME", ""):
+                        Settings.CI_DB_DB_NAME = Settings.KEEPER_CI_DB_DB_NAME
+                    if getattr(Settings, "KEEPER_CI_DB_TABLE_NAME", ""):
+                        Settings.CI_DB_TABLE_NAME = Settings.KEEPER_CI_DB_TABLE_NAME
+                    if not Settings.CI_DB_TABLE_NAME:
+                        Settings.CI_DB_TABLE_NAME = "checks"
+                    job_name = os.environ.get("JOB_NAME", "keeper-stress").strip() or "keeper-stress"
+                    prn = 0
+                    try:
+                        prn = int(os.environ.get("PR_NUMBER", "0") or 0)
+                    except Exception:
+                        prn = 0
+                    status = "success"
+                    tdur_ms = int(max(0, (time.time() - start_ts)) * 1000)
+                    ts_str = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(start_ts))
+                    row = {
+                        "pull_request_number": prn,
+                        "commit_sha": run_meta_eff.get("commit_sha", "local"),
+                        "commit_url": "",
+                        "check_name": job_name,
+                        "check_status": status,
+                        "check_duration_ms": tdur_ms,
+                        "check_start_time": ts_str,
+                        "report_url": "",
+                        "pull_request_url": "",
+                        "base_ref": "",
+                        "base_repo": "",
+                        "head_ref": "",
+                        "head_repo": "",
+                        "task_url": "",
+                        "instance_type": "",
+                        "instance_id": "",
+                        "test_name": scenario.get("id", ""),
+                        "test_status": "OK",
+                        "test_duration_ms": tdur_ms,
+                        "test_context_raw": json.dumps(summary),
+                    }
+                    CIDB(url=url_w, user=user_w, passwd=pwd_w).insert_rows([json.dumps(row)])
+            except Exception:
+                pass
+        except Exception:
+            # Emit minimal reproducible scenario to a file for debugging
+            try:
+                repro_path = f"/tmp/keeper_repro_{run_id}.yaml"
+                with open(repro_path, "w", encoding="utf-8") as f:
+                    yaml.safe_dump(scenario, f, sort_keys=False)
+                print(f"[keeper] reproducible scenario written: {repro_path}")
+            except Exception:
+                pass
+            # Attempt to snapshot fail state as well
+            try:
+                sink_url=request.config.getoption("--sink-url")
+                _snapshot_and_sink(nodes, "fail", scenario.get("id",""), topo, run_meta_eff, sink_url, run_id)
+            except Exception:
+                pass
+            try:
+                from ci.praktika.cidb import CIDB
+                from ci.praktika.settings import Settings
+                from ci.praktika.info import Info
+                info = Info()
+&gt;               url_secret = info.get_secret(Settings.SECRET_CI_DB_URL)
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/stress/keeper/tests/test_scenarios.py:370: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+ci/praktika/info.py:142: in get_secret
+    return self.workflow.get_secret(name)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/tests/test_scenarios.py:274: in test_scenario
+    for action in fs_effective: _apply_step(action, nodes, leader, ctx)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/tests/test_scenarios.py:19: in _apply_step
+    apply_step_dispatcher(step, nodes, leader, ctx)
+tests/stress/keeper/framework/faults.py:174: in apply_step
+    return fault_registry[kind](ctx, nodes, leader, step)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/faults.py:256: in _f_dm_delay
+    return impl(ctx, nodes, leader, step)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/faults_disk.py:153: in _f_dm_delay
+    _for_each_target(step, nodes, leader, _run_one)
+tests/stress/keeper/framework/faults_disk.py:27: in _for_each_target
+    raise errors[0]
+tests/stress/keeper/framework/faults_disk.py:17: in _wrap
+    run_one(t)
+tests/stress/keeper/framework/faults_disk.py:150: in _run_one
+    with dm_delay(t, step.get("ms", 3)):
+/usr/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+node = &lt;helpers.cluster.ClickHouseInstance object at 0xfa1d370aebd0&gt;
+ms = 3
+
+    @contextmanager
+    def dm_delay(node, ms=3):
+        try:
+            suffix = getattr(node, "name", "node")
+            dm_name = f"kdelay_{suffix}"
+            img = f"/var/lib/keeper_delay_{suffix}.img"
+            backend_dev = ""
+            # Prefer RAM block device if present inside container
+            ram = sh(node, "ls -1 /dev/ram* 2&gt;/dev/null | head -n1 || true")['out'].strip()
+            if ram:
+                backend_dev = ram
+            else:
+                sh_root(node, f"rm -f {img} || true")
+                sh_root(node, f"dd if=/dev/zero of={img} bs=1M count=256")
+                # Ensure prior loop for this image is detached
+                sh_root(node, f"LOOP=$(losetup -j {img} | cut -d: -f1); [ -n \"$LOOP\" ] &amp;&amp; losetup -d $LOOP || true")
+                lo = sh_root(node, f"losetup -f --show {img}")['out'].strip()
+                backend_dev = lo
+            if not backend_dev:
+                if STRICT_FAULTS:
+                    raise AssertionError("dm_delay: cannot create loop device")
+                yield
+                return
+            sz = sh_root(node, f"blockdev --getsz {backend_dev}")['out'].strip()
+            sh_root(node, "umount /var/lib/clickhouse/coordination || true")
+            sh_root(node, f"dmsetup remove --retry -f {dm_name} || true")
+            sh(node, f"i=0; while dmsetup info {dm_name} &gt;/dev/null 2&gt;&amp;1 &amp;&amp; [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done")
+            sh_root(node, f"dmsetup create {dm_name} --table '0 {sz} delay {backend_dev} 0 {ms} {backend_dev} 0 {ms}'")
+            try:
+                sh(node, "pkill -STOP -x clickhouse || pkill -STOP clickhouse-server || true")
+                sh_root(node, f"dmsetup mknodes {dm_name} || dmsetup mknodes")
+                sh(node, f"i=0; while [ ! -e /dev/mapper/{dm_name} ] &amp;&amp; [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done; [ -e /dev/mapper/{dm_name} ] &amp;&amp; echo ok || (dmsetup info {dm_name} &amp;&amp; false)")
+                sh_root(node, "umount /var/lib/clickhouse/coordination || true")
+                sh_root(node, f"mkdir -p /var/lib/clickhouse/coordination /mnt/{dm_name} || true")
+                sh_root(node, f"wipefs -a /dev/mapper/{dm_name} || true")
+                sh_root(node, f"mkfs.ext4 -E nodiscard,lazy_itable_init=0,lazy_journal_init=0 -F /dev/mapper/{dm_name}")
+                sh_root(node, "sync || true; (command -v udevadm &gt;/dev/null 2&gt;&amp;1 &amp;&amp; udevadm settle) || true")
+                sh(node, f"i=0; while ! blkid /dev/mapper/{dm_name} &gt;/dev/null 2&gt;&amp;1 &amp;&amp; [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done")
+                sh(node, "sleep 0.3")
+                sh_root(node, f"mount -t ext4 -o rw,nodelalloc,data=writeback,noatime /dev/mapper/{dm_name} /mnt/{dm_name}")
+                sh_root(node, f"mount --bind /mnt/{dm_name} /var/lib/clickhouse/coordination")
+            except Exception as e:
+                if STRICT_FAULTS:
+&gt;                   raise AssertionError(f"dm_delay: mount failed: {e}")
+E                   AssertionError: dm_delay: mount failed: Command [docker exec -u root --privileged ubuntutestscha01rocksdbt3localc663e771-keeper2-1 bash -lc export PATH="$PATH:/usr/sbin:/sbin"; mount -t ext4 -o rw,nodelalloc,data=writeback,noatime /dev/mapper/kdelay_keeper2 /mnt/kdelay_keeper2] return non-zero code 32: mount: /mnt/kdelay_keeper2: cannot mount; probably corrupted filesystem on /dev/mapper/kdelay_keeper2.
+
+tests/stress/keeper/framework/faults_disk.py:76: AssertionError</failure></testcase><testcase classname="tests.stress.keeper.tests.test_scenarios" name="test_scenario[LDR-02[default|t3]]" time="45.866" /><testcase classname="tests.stress.keeper.tests.test_scenarios" name="test_scenario[LDR-02[rocksdb|t3]]" time="45.959"><failure message="AssertionError: expected: no critical errors in logs; observed: hits=1; context: keeper1:Error:Code: 999. Coordination::Exception: Received error in heartbeat response: Operation timeout. (KEEPER_EXCEPTION), Stack trace (when copying this message, always include the lines below):&#10;&#10;0. /home/ubun">scenario = {'backend': 'rocksdb', 'faults': [{'kind': 'partition_oneway', True: 'leader', 'duration_s': 30}], 'gates': [{'type': ...'}, {'max_ratio': 0.05, 'type': 'error_rate_le'}, {'max_ms': 5000, 'type': 'p99_le'}], 'id': 'LDR-02[rocksdb|t3]', ...}
+cluster_factory = &lt;function cluster_factory.&lt;locals&gt;._make at 0xfa1d3550cf40&gt;
+request = &lt;FixtureRequest for &lt;Function test_scenario[LDR-02[rocksdb|t3]]&gt;&gt;
+run_meta = {'backend': 'default', 'commit_sha': 'local'}
+
+    @pytest.mark.timeout(2400)
+    def test_scenario(scenario, cluster_factory, request, run_meta):
+        start_ts = time.time()
+        topo=scenario.get("topology",3)
+        flags=scenario.get("keeper_flags_xml","")
+        backend = scenario.get("backend") or request.config.getoption("--keeper-backend")
+        # Effective run_meta per test with the scenario-selected backend
+        run_meta_eff = dict(run_meta or {})
+        try:
+            run_meta_eff["backend"] = backend
+        except Exception:
+            pass
+        opts=scenario.get("opts", {})
+        try:
+            faults_mode = request.config.getoption("--faults")
+        except Exception:
+            faults_mode = os.environ.get("KEEPER_FAULTS", "on")
+        try:
+            rnd_count = int(request.config.getoption("--random-faults-count") or 1)
+        except Exception:
+            rnd_count = int(os.environ.get("KEEPER_RANDOM_FAULTS_COUNT", "1"))
+        try:
+            seed_val = int(request.config.getoption("--seed") or 0)
+        except Exception:
+            seed_val = 0
+        fs_original = scenario.get("faults", []) or []
+        fs_effective = fs_original
+        if faults_mode == "off":
+            fs_effective = []
+        elif faults_mode == "random":
+            try:
+                dur_default = int((scenario.get("workload") or {}).get("duration") or request.config.getoption("--duration"))
+            except Exception:
+                dur_default = int(os.environ.get("KEEPER_DURATION", "120"))
+            if seed_val &lt;= 0:
+                import os as _os
+                seed_val = int.from_bytes(_os.urandom(4), 'big')
+            try:
+                try:
+                    inc_raw = request.config.getoption("--random-faults-include") or os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                except Exception:
+                    inc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                try:
+                    exc_raw = request.config.getoption("--random-faults-exclude") or os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                except Exception:
+                    exc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                inc = set([x.strip() for x in (inc_raw or "").split(",") if x.strip()])
+                exc = set([x.strip() for x in (exc_raw or "").split(",") if x.strip()])
+                cands = [k for k in list(getattr(fault_registry, 'keys', lambda: [])()) if k not in _FUZZ_EXCLUDE]
+                if not cands and isinstance(fault_registry, dict):
+                    cands = [k for k in fault_registry.keys() if k not in _FUZZ_EXCLUDE]
+                weights = {}
+                if inc:
+                    for k in cands:
+                        weights[k] = 1 if k in inc else 0
+                else:
+                    for k in cands:
+                        weights[k] = 0 if k in exc else 1
+                fz = generate_fuzz_scenario(seed_val, max(1, rnd_count), dur_default, weights=weights)
+                rnd_faults = fz.get("faults", []) or []
+                rb = {"kind": "run_bench", "duration_s": dur_default}
+                fs_effective = [{"kind": "parallel", "steps": [rb] + rnd_faults}]
+            except Exception:
+                fs_effective = fs_original
+        try:
+            uses_dm = any((f.get("kind") in ("dm_delay","dm_error")) for f in fs_effective)
+            if uses_dm:
+                os.environ.setdefault("KEEPER_PRIVILEGED", "1")
+                os.environ.setdefault("KEEPER_HOST_AUTO_PROVISION", "1")
+            # Relax log gate for known transient errors during chaos if not provided by env
+            os.environ.setdefault(
+                "KEEPER_LOG_ALLOW",
+                "failed to read rpc header.*End of file|DNS error|Not found address of host|Net Exception: Socket is not connected|CANNOT_READ_ALL_DATA|Cannot read all data|Unknown table.*system\\.trace_log|Unknown table expression identifier 'system\\.trace_log'"
+            )
+        except Exception:
+            pass
+        # compute run_id early for reproducible artifact paths
+        run_id=f"{scenario.get('id','')}-{run_meta.get('commit_sha','local')}-{uuid.uuid4().hex[:8]}"
+        # Use a unique cluster name per test to avoid instance-dir collisions
+        try:
+            cname = run_id.replace('/', '_').replace(' ', '_')
+            os.environ["KEEPER_CLUSTER_NAME"] = cname
+        except Exception:
+            pass
+        cluster, nodes = cluster_factory(topo, backend, opts)
+        summary={}; ctx={}
+        try:
+            try:
+                scenario_for_env = copy.deepcopy(scenario)
+                scenario_for_env["faults"] = fs_effective
+            except Exception:
+                scenario_for_env = scenario
+            ensure_environment(nodes, scenario_for_env)
+            single_leader(nodes)
+            leader=[n for n in nodes if is_leader(n)][0]
+            sink_url=request.config.getoption("--sink-url")
+            _snapshot_and_sink(nodes, "pre", scenario.get("id",""), topo, run_meta_eff, sink_url, run_id)
+            ctx["cluster"] = cluster
+            try:
+                ctx["faults_mode"] = request.config.getoption("--faults")
+            except Exception:
+                ctx["faults_mode"] = ctx.get("faults_mode", "on")
+            try:
+                ctx["log_allow"] = request.config.getoption("--log-allow") or ""
+            except Exception:
+                ctx["log_allow"] = ctx.get("log_allow", "")
+            # propagate seed if provided
+            try:
+                ctx["seed"] = int(request.config.getoption("--seed") or 0)
+            except Exception:
+                ctx["seed"] = 0
+            sampler=None
+            if sink_url:
+                interval=int(opts.get("monitor_interval_s", 5)) if isinstance(opts, dict) else 5
+                prom_allow = opts.get("prom_allow_prefixes") if isinstance(opts, dict) else None
+                sampler=MetricsSampler(nodes, run_meta_eff, scenario.get("id",""), topo, sink_url=sink_url, interval_s=interval, stage_prefix="run", run_id=run_id, prom_allow_prefixes=prom_allow, ctx=ctx)
+                sampler.start()
+            for step in scenario.get("pre", []): _apply_step(step, nodes, leader, ctx)
+            kb=None
+            if faults_mode != "random" and "workload" in scenario:
+                wl=scenario["workload"]
+                secure = False
+                kb=KeeperBench(
+                    nodes[0],
+                    servers_arg(nodes),
+                    cfg_path=str(WORKDIR/wl["config"]) if wl.get("config") else None,
+                    duration_s=wl.get("duration", request.config.getoption("--duration")),
+                    replay_path=wl.get("replay"),
+                    secure=secure,
+                )
+                ctx["workload"]=wl; ctx["bench_node"]=nodes[0]; ctx["bench_secure"]=secure; ctx["bench_servers"]=servers_arg(nodes)
+            for action in fs_effective: _apply_step(action, nodes, leader, ctx)
+            if kb:
+                summary = kb.run()
+            elif ctx.get("bench_summary"):
+                summary = ctx.get("bench_summary") or {}
+            for gate in scenario.get("gates", []): _apply_gate(gate, nodes, leader, ctx, summary)
+            if sink_url:
+                run_row={
+                    "run_id": run_id,
+                    "commit_sha": run_meta_eff.get("commit_sha","local"),
+                    "backend": backend,
+                    "scenario": scenario.get("id",""),
+                    "topology": topo,
+                    "summary_json": json.dumps(summary),
+                }
+                sink_clickhouse(sink_url, "keeper_bench_runs", [run_row])
+            _snapshot_and_sink(nodes, "post", scenario.get("id",""), topo, run_meta_eff, sink_url, run_id)
+            try:
+                from ci.praktika.cidb import CIDB
+                from ci.praktika.settings import Settings
+                from ci.praktika.info import Info
+                info = Info()
+                url_secret = info.get_secret(Settings.SECRET_CI_DB_URL)
+                user_secret = info.get_secret(Settings.SECRET_CI_DB_USER)
+                passwd_secret = info.get_secret(Settings.SECRET_CI_DB_PASSWORD)
+                url_w = user_w = pwd_w = None
+                if url_secret and user_secret and passwd_secret:
+                    url_w, user_w, pwd_w = url_secret.join_with(user_secret).join_with(passwd_secret).get_value()
+                else:
+                    try:
+                        url_w = os.environ.get("KEEPER_CIDB_URL", "").strip()
+                        user_w = os.environ.get("KEEPER_CIDB_USER", "").strip()
+                        pwd_w = os.environ.get("KEEPER_CIDB_PASSWORD", "").strip()
+                    except Exception:
+                        url_w = user_w = pwd_w = None
+                if url_w and user_w and pwd_w:
+                    if getattr(Settings, "KEEPER_CI_DB_DB_NAME", ""):
+                        Settings.CI_DB_DB_NAME = Settings.KEEPER_CI_DB_DB_NAME
+                    if getattr(Settings, "KEEPER_CI_DB_TABLE_NAME", ""):
+                        Settings.CI_DB_TABLE_NAME = Settings.KEEPER_CI_DB_TABLE_NAME
+                    if not Settings.CI_DB_TABLE_NAME:
+                        Settings.CI_DB_TABLE_NAME = "checks"
+                    job_name = os.environ.get("JOB_NAME", "keeper-stress").strip() or "keeper-stress"
+                    prn = 0
+                    try:
+                        prn = int(os.environ.get("PR_NUMBER", "0") or 0)
+                    except Exception:
+                        prn = 0
+                    status = "success"
+                    tdur_ms = int(max(0, (time.time() - start_ts)) * 1000)
+                    ts_str = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(start_ts))
+                    row = {
+                        "pull_request_number": prn,
+                        "commit_sha": run_meta_eff.get("commit_sha", "local"),
+                        "commit_url": "",
+                        "check_name": job_name,
+                        "check_status": status,
+                        "check_duration_ms": tdur_ms,
+                        "check_start_time": ts_str,
+                        "report_url": "",
+                        "pull_request_url": "",
+                        "base_ref": "",
+                        "base_repo": "",
+                        "head_ref": "",
+                        "head_repo": "",
+                        "task_url": "",
+                        "instance_type": "",
+                        "instance_id": "",
+                        "test_name": scenario.get("id", ""),
+                        "test_status": "OK",
+                        "test_duration_ms": tdur_ms,
+                        "test_context_raw": json.dumps(summary),
+                    }
+                    CIDB(url=url_w, user=user_w, passwd=pwd_w).insert_rows([json.dumps(row)])
+            except Exception:
+                pass
+        except Exception:
+            # Emit minimal reproducible scenario to a file for debugging
+            try:
+                repro_path = f"/tmp/keeper_repro_{run_id}.yaml"
+                with open(repro_path, "w", encoding="utf-8") as f:
+                    yaml.safe_dump(scenario, f, sort_keys=False)
+                print(f"[keeper] reproducible scenario written: {repro_path}")
+            except Exception:
+                pass
+            # Attempt to snapshot fail state as well
+            try:
+                sink_url=request.config.getoption("--sink-url")
+                _snapshot_and_sink(nodes, "fail", scenario.get("id",""), topo, run_meta_eff, sink_url, run_id)
+            except Exception:
+                pass
+            try:
+                from ci.praktika.cidb import CIDB
+                from ci.praktika.settings import Settings
+                from ci.praktika.info import Info
+                info = Info()
+&gt;               url_secret = info.get_secret(Settings.SECRET_CI_DB_URL)
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/stress/keeper/tests/test_scenarios.py:370: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+ci/praktika/info.py:142: in get_secret
+    return self.workflow.get_secret(name)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/tests/test_scenarios.py:279: in test_scenario
+    for gate in scenario.get("gates", []): _apply_gate(gate, nodes, leader, ctx, summary)
+                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/tests/test_scenarios.py:22: in _apply_gate
+    apply_gate(gate, nodes, leader, ctx, summary)
+tests/stress/keeper/framework/gates.py:505: in apply_gate
+    fn(ctx, nodes, leader, gate, summary)
+tests/stress/keeper/framework/gates.py:466: in _g_log_sanity
+    expect(len(hits) == 0, expected="no critical errors in logs", observed=f"hits={len(hits)}", context=("; ".join(f"{h[0]}:{h[2]}:{h[3]}" for h in hits[:5])))
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+condition = False, expected = 'no critical errors in logs'
+observed = 'hits=1'
+context = 'keeper1:Error:Code: 999. Coordination::Exception: Received error in heartbeat response: Operation timeout. (KEEPER_EXCEPTION), Stack trace (when copying this message, always include the lines below):\n\n0. /home/ubun'
+
+    def expect(condition: bool, expected: str, observed: str = "", context: str = ""):
+        if condition:
+            return
+        parts = [f"expected: {expected}"]
+        if observed:
+            parts.append(f"observed: {observed}")
+        if context:
+            parts.append(f"context: {context}")
+        msg = "; ".join(parts)
+&gt;       raise AssertionError(msg)
+E       AssertionError: expected: no critical errors in logs; observed: hits=1; context: keeper1:Error:Code: 999. Coordination::Exception: Received error in heartbeat response: Operation timeout. (KEEPER_EXCEPTION), Stack trace (when copying this message, always include the lines below):
+E       
+E       0. /home/ubun
+
+tests/stress/keeper/framework/expect.py:10: AssertionError</failure></testcase><testcase classname="tests.stress.keeper.tests.test_scenarios" name="test_scenario[RCFG-06[default|t3]]" time="57.985"><failure message="helpers.keeper_utils.KeeperException: Coordination::Exception: All connection tries failed while connecting to ZooKeeper. nodes: 172.22.0.4:9181">scenario = {'backend': 'default', 'faults': [{'kind': 'partition_symmetric_during', 'on': 'leader', 'steps': [{'kind': 'reconfig'...nfig_members_len_eq'}, {'type': 'backlog_drains'}, {'type': 'health_precheck'}, ...], 'id': 'RCFG-06[default|t3]', ...}
+cluster_factory = &lt;function cluster_factory.&lt;locals&gt;._make at 0xfa1d355bfb00&gt;
+request = &lt;FixtureRequest for &lt;Function test_scenario[RCFG-06[default|t3]]&gt;&gt;
+run_meta = {'backend': 'default', 'commit_sha': 'local'}
+
+    @pytest.mark.timeout(2400)
+    def test_scenario(scenario, cluster_factory, request, run_meta):
+        start_ts = time.time()
+        topo=scenario.get("topology",3)
+        flags=scenario.get("keeper_flags_xml","")
+        backend = scenario.get("backend") or request.config.getoption("--keeper-backend")
+        # Effective run_meta per test with the scenario-selected backend
+        run_meta_eff = dict(run_meta or {})
+        try:
+            run_meta_eff["backend"] = backend
+        except Exception:
+            pass
+        opts=scenario.get("opts", {})
+        try:
+            faults_mode = request.config.getoption("--faults")
+        except Exception:
+            faults_mode = os.environ.get("KEEPER_FAULTS", "on")
+        try:
+            rnd_count = int(request.config.getoption("--random-faults-count") or 1)
+        except Exception:
+            rnd_count = int(os.environ.get("KEEPER_RANDOM_FAULTS_COUNT", "1"))
+        try:
+            seed_val = int(request.config.getoption("--seed") or 0)
+        except Exception:
+            seed_val = 0
+        fs_original = scenario.get("faults", []) or []
+        fs_effective = fs_original
+        if faults_mode == "off":
+            fs_effective = []
+        elif faults_mode == "random":
+            try:
+                dur_default = int((scenario.get("workload") or {}).get("duration") or request.config.getoption("--duration"))
+            except Exception:
+                dur_default = int(os.environ.get("KEEPER_DURATION", "120"))
+            if seed_val &lt;= 0:
+                import os as _os
+                seed_val = int.from_bytes(_os.urandom(4), 'big')
+            try:
+                try:
+                    inc_raw = request.config.getoption("--random-faults-include") or os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                except Exception:
+                    inc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                try:
+                    exc_raw = request.config.getoption("--random-faults-exclude") or os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                except Exception:
+                    exc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                inc = set([x.strip() for x in (inc_raw or "").split(",") if x.strip()])
+                exc = set([x.strip() for x in (exc_raw or "").split(",") if x.strip()])
+                cands = [k for k in list(getattr(fault_registry, 'keys', lambda: [])()) if k not in _FUZZ_EXCLUDE]
+                if not cands and isinstance(fault_registry, dict):
+                    cands = [k for k in fault_registry.keys() if k not in _FUZZ_EXCLUDE]
+                weights = {}
+                if inc:
+                    for k in cands:
+                        weights[k] = 1 if k in inc else 0
+                else:
+                    for k in cands:
+                        weights[k] = 0 if k in exc else 1
+                fz = generate_fuzz_scenario(seed_val, max(1, rnd_count), dur_default, weights=weights)
+                rnd_faults = fz.get("faults", []) or []
+                rb = {"kind": "run_bench", "duration_s": dur_default}
+                fs_effective = [{"kind": "parallel", "steps": [rb] + rnd_faults}]
+            except Exception:
+                fs_effective = fs_original
+        try:
+            uses_dm = any((f.get("kind") in ("dm_delay","dm_error")) for f in fs_effective)
+            if uses_dm:
+                os.environ.setdefault("KEEPER_PRIVILEGED", "1")
+                os.environ.setdefault("KEEPER_HOST_AUTO_PROVISION", "1")
+            # Relax log gate for known transient errors during chaos if not provided by env
+            os.environ.setdefault(
+                "KEEPER_LOG_ALLOW",
+                "failed to read rpc header.*End of file|DNS error|Not found address of host|Net Exception: Socket is not connected|CANNOT_READ_ALL_DATA|Cannot read all data|Unknown table.*system\\.trace_log|Unknown table expression identifier 'system\\.trace_log'"
+            )
+        except Exception:
+            pass
+        # compute run_id early for reproducible artifact paths
+        run_id=f"{scenario.get('id','')}-{run_meta.get('commit_sha','local')}-{uuid.uuid4().hex[:8]}"
+        # Use a unique cluster name per test to avoid instance-dir collisions
+        try:
+            cname = run_id.replace('/', '_').replace(' ', '_')
+            os.environ["KEEPER_CLUSTER_NAME"] = cname
+        except Exception:
+            pass
+        cluster, nodes = cluster_factory(topo, backend, opts)
+        summary={}; ctx={}
+        try:
+            try:
+                scenario_for_env = copy.deepcopy(scenario)
+                scenario_for_env["faults"] = fs_effective
+            except Exception:
+                scenario_for_env = scenario
+            ensure_environment(nodes, scenario_for_env)
+            single_leader(nodes)
+            leader=[n for n in nodes if is_leader(n)][0]
+            sink_url=request.config.getoption("--sink-url")
+            _snapshot_and_sink(nodes, "pre", scenario.get("id",""), topo, run_meta_eff, sink_url, run_id)
+            ctx["cluster"] = cluster
+            try:
+                ctx["faults_mode"] = request.config.getoption("--faults")
+            except Exception:
+                ctx["faults_mode"] = ctx.get("faults_mode", "on")
+            try:
+                ctx["log_allow"] = request.config.getoption("--log-allow") or ""
+            except Exception:
+                ctx["log_allow"] = ctx.get("log_allow", "")
+            # propagate seed if provided
+            try:
+                ctx["seed"] = int(request.config.getoption("--seed") or 0)
+            except Exception:
+                ctx["seed"] = 0
+            sampler=None
+            if sink_url:
+                interval=int(opts.get("monitor_interval_s", 5)) if isinstance(opts, dict) else 5
+                prom_allow = opts.get("prom_allow_prefixes") if isinstance(opts, dict) else None
+                sampler=MetricsSampler(nodes, run_meta_eff, scenario.get("id",""), topo, sink_url=sink_url, interval_s=interval, stage_prefix="run", run_id=run_id, prom_allow_prefixes=prom_allow, ctx=ctx)
+                sampler.start()
+            for step in scenario.get("pre", []): _apply_step(step, nodes, leader, ctx)
+            kb=None
+            if faults_mode != "random" and "workload" in scenario:
+                wl=scenario["workload"]
+                secure = False
+                kb=KeeperBench(
+                    nodes[0],
+                    servers_arg(nodes),
+                    cfg_path=str(WORKDIR/wl["config"]) if wl.get("config") else None,
+                    duration_s=wl.get("duration", request.config.getoption("--duration")),
+                    replay_path=wl.get("replay"),
+                    secure=secure,
+                )
+                ctx["workload"]=wl; ctx["bench_node"]=nodes[0]; ctx["bench_secure"]=secure; ctx["bench_servers"]=servers_arg(nodes)
+            for action in fs_effective: _apply_step(action, nodes, leader, ctx)
+            if kb:
+                summary = kb.run()
+            elif ctx.get("bench_summary"):
+                summary = ctx.get("bench_summary") or {}
+            for gate in scenario.get("gates", []): _apply_gate(gate, nodes, leader, ctx, summary)
+            if sink_url:
+                run_row={
+                    "run_id": run_id,
+                    "commit_sha": run_meta_eff.get("commit_sha","local"),
+                    "backend": backend,
+                    "scenario": scenario.get("id",""),
+                    "topology": topo,
+                    "summary_json": json.dumps(summary),
+                }
+                sink_clickhouse(sink_url, "keeper_bench_runs", [run_row])
+            _snapshot_and_sink(nodes, "post", scenario.get("id",""), topo, run_meta_eff, sink_url, run_id)
+            try:
+                from ci.praktika.cidb import CIDB
+                from ci.praktika.settings import Settings
+                from ci.praktika.info import Info
+                info = Info()
+                url_secret = info.get_secret(Settings.SECRET_CI_DB_URL)
+                user_secret = info.get_secret(Settings.SECRET_CI_DB_USER)
+                passwd_secret = info.get_secret(Settings.SECRET_CI_DB_PASSWORD)
+                url_w = user_w = pwd_w = None
+                if url_secret and user_secret and passwd_secret:
+                    url_w, user_w, pwd_w = url_secret.join_with(user_secret).join_with(passwd_secret).get_value()
+                else:
+                    try:
+                        url_w = os.environ.get("KEEPER_CIDB_URL", "").strip()
+                        user_w = os.environ.get("KEEPER_CIDB_USER", "").strip()
+                        pwd_w = os.environ.get("KEEPER_CIDB_PASSWORD", "").strip()
+                    except Exception:
+                        url_w = user_w = pwd_w = None
+                if url_w and user_w and pwd_w:
+                    if getattr(Settings, "KEEPER_CI_DB_DB_NAME", ""):
+                        Settings.CI_DB_DB_NAME = Settings.KEEPER_CI_DB_DB_NAME
+                    if getattr(Settings, "KEEPER_CI_DB_TABLE_NAME", ""):
+                        Settings.CI_DB_TABLE_NAME = Settings.KEEPER_CI_DB_TABLE_NAME
+                    if not Settings.CI_DB_TABLE_NAME:
+                        Settings.CI_DB_TABLE_NAME = "checks"
+                    job_name = os.environ.get("JOB_NAME", "keeper-stress").strip() or "keeper-stress"
+                    prn = 0
+                    try:
+                        prn = int(os.environ.get("PR_NUMBER", "0") or 0)
+                    except Exception:
+                        prn = 0
+                    status = "success"
+                    tdur_ms = int(max(0, (time.time() - start_ts)) * 1000)
+                    ts_str = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(start_ts))
+                    row = {
+                        "pull_request_number": prn,
+                        "commit_sha": run_meta_eff.get("commit_sha", "local"),
+                        "commit_url": "",
+                        "check_name": job_name,
+                        "check_status": status,
+                        "check_duration_ms": tdur_ms,
+                        "check_start_time": ts_str,
+                        "report_url": "",
+                        "pull_request_url": "",
+                        "base_ref": "",
+                        "base_repo": "",
+                        "head_ref": "",
+                        "head_repo": "",
+                        "task_url": "",
+                        "instance_type": "",
+                        "instance_id": "",
+                        "test_name": scenario.get("id", ""),
+                        "test_status": "OK",
+                        "test_duration_ms": tdur_ms,
+                        "test_context_raw": json.dumps(summary),
+                    }
+                    CIDB(url=url_w, user=user_w, passwd=pwd_w).insert_rows([json.dumps(row)])
+            except Exception:
+                pass
+        except Exception:
+            # Emit minimal reproducible scenario to a file for debugging
+            try:
+                repro_path = f"/tmp/keeper_repro_{run_id}.yaml"
+                with open(repro_path, "w", encoding="utf-8") as f:
+                    yaml.safe_dump(scenario, f, sort_keys=False)
+                print(f"[keeper] reproducible scenario written: {repro_path}")
+            except Exception:
+                pass
+            # Attempt to snapshot fail state as well
+            try:
+                sink_url=request.config.getoption("--sink-url")
+                _snapshot_and_sink(nodes, "fail", scenario.get("id",""), topo, run_meta_eff, sink_url, run_id)
+            except Exception:
+                pass
+            try:
+                from ci.praktika.cidb import CIDB
+                from ci.praktika.settings import Settings
+                from ci.praktika.info import Info
+                info = Info()
+&gt;               url_secret = info.get_secret(Settings.SECRET_CI_DB_URL)
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/stress/keeper/tests/test_scenarios.py:370: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+ci/praktika/info.py:142: in get_secret
+    return self.workflow.get_secret(name)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/tests/test_scenarios.py:274: in test_scenario
+    for action in fs_effective: _apply_step(action, nodes, leader, ctx)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/tests/test_scenarios.py:19: in _apply_step
+    apply_step_dispatcher(step, nodes, leader, ctx)
+tests/stress/keeper/framework/faults.py:174: in apply_step
+    return fault_registry[kind](ctx, nodes, leader, step)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/faults.py:306: in _f_ps_during
+    return impl(ctx, nodes, leader, step)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/faults_network.py:411: in _f_ps_during
+    apply_step(sub, nodes, leader, ctx)
+tests/stress/keeper/framework/faults.py:174: in apply_step
+    return fault_registry[kind](ctx, nodes, leader, step)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/faults.py:331: in _f_reconfig
+    cli = _get_cli(cluster, node, ctx)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/faults.py:38: in _get_cli
+    cli = ku.KeeperClient(cluster.server_bin_path, cluster.get_instance_ip(name), CLIENT_PORT)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/integration/helpers/keeper_utils.py:123: in __init__
+    self.get("/keeper", 60.0)
+tests/integration/helpers/keeper_utils.py:183: in get
+    return self.execute_query(f"get '{path}'", timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;helpers.keeper_utils.KeeperClient object at 0xfa1d37ffa1b0&gt;
+query = "get '/keeper'", timeout = 60.0
+
+    def execute_query(self, query: str, timeout: float = 60.0) -&gt; str:
+        output = io.BytesIO()
+    
+        self.proc.stdin.write(query.encode() + b"\n")
+        self.proc.stdin.flush()
+    
+        events = self.poller.poll(timeout)
+        if not events:
+            raise TimeoutError(f"Keeper client returned no output")
+    
+        for fd_num, event in events:
+            if event &amp; (select.EPOLLIN | select.EPOLLPRI):
+                file = self._fd_nums[fd_num]
+    
+                if file == self.proc.stdout:
+                    while True:
+                        chunk = file.readline()
+                        if chunk.endswith(self.SEPARATOR):
+                            break
+    
+                        output.write(chunk)
+    
+                elif file == self.proc.stderr:
+                    self.proc.stdout.readline()
+&gt;                   raise KeeperException(self.proc.stderr.readline().strip().decode())
+E                   helpers.keeper_utils.KeeperException: Coordination::Exception: All connection tries failed while connecting to ZooKeeper. nodes: 172.22.0.4:9181
+
+tests/integration/helpers/keeper_utils.py:165: KeeperException</failure></testcase><testcase classname="tests.stress.keeper.tests.test_scenarios" name="test_scenario[RCFG-06[rocksdb|t3]]" time="58.438"><failure message="helpers.keeper_utils.KeeperException: Coordination::Exception: All connection tries failed while connecting to ZooKeeper. nodes: 172.22.0.2:9181">scenario = {'backend': 'rocksdb', 'faults': [{'kind': 'partition_symmetric_during', 'on': 'leader', 'steps': [{'kind': 'reconfig'...nfig_members_len_eq'}, {'type': 'backlog_drains'}, {'type': 'health_precheck'}, ...], 'id': 'RCFG-06[rocksdb|t3]', ...}
+cluster_factory = &lt;function cluster_factory.&lt;locals&gt;._make at 0xfa1d3550f100&gt;
+request = &lt;FixtureRequest for &lt;Function test_scenario[RCFG-06[rocksdb|t3]]&gt;&gt;
+run_meta = {'backend': 'default', 'commit_sha': 'local'}
+
+    @pytest.mark.timeout(2400)
+    def test_scenario(scenario, cluster_factory, request, run_meta):
+        start_ts = time.time()
+        topo=scenario.get("topology",3)
+        flags=scenario.get("keeper_flags_xml","")
+        backend = scenario.get("backend") or request.config.getoption("--keeper-backend")
+        # Effective run_meta per test with the scenario-selected backend
+        run_meta_eff = dict(run_meta or {})
+        try:
+            run_meta_eff["backend"] = backend
+        except Exception:
+            pass
+        opts=scenario.get("opts", {})
+        try:
+            faults_mode = request.config.getoption("--faults")
+        except Exception:
+            faults_mode = os.environ.get("KEEPER_FAULTS", "on")
+        try:
+            rnd_count = int(request.config.getoption("--random-faults-count") or 1)
+        except Exception:
+            rnd_count = int(os.environ.get("KEEPER_RANDOM_FAULTS_COUNT", "1"))
+        try:
+            seed_val = int(request.config.getoption("--seed") or 0)
+        except Exception:
+            seed_val = 0
+        fs_original = scenario.get("faults", []) or []
+        fs_effective = fs_original
+        if faults_mode == "off":
+            fs_effective = []
+        elif faults_mode == "random":
+            try:
+                dur_default = int((scenario.get("workload") or {}).get("duration") or request.config.getoption("--duration"))
+            except Exception:
+                dur_default = int(os.environ.get("KEEPER_DURATION", "120"))
+            if seed_val &lt;= 0:
+                import os as _os
+                seed_val = int.from_bytes(_os.urandom(4), 'big')
+            try:
+                try:
+                    inc_raw = request.config.getoption("--random-faults-include") or os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                except Exception:
+                    inc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                try:
+                    exc_raw = request.config.getoption("--random-faults-exclude") or os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                except Exception:
+                    exc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                inc = set([x.strip() for x in (inc_raw or "").split(",") if x.strip()])
+                exc = set([x.strip() for x in (exc_raw or "").split(",") if x.strip()])
+                cands = [k for k in list(getattr(fault_registry, 'keys', lambda: [])()) if k not in _FUZZ_EXCLUDE]
+                if not cands and isinstance(fault_registry, dict):
+                    cands = [k for k in fault_registry.keys() if k not in _FUZZ_EXCLUDE]
+                weights = {}
+                if inc:
+                    for k in cands:
+                        weights[k] = 1 if k in inc else 0
+                else:
+                    for k in cands:
+                        weights[k] = 0 if k in exc else 1
+                fz = generate_fuzz_scenario(seed_val, max(1, rnd_count), dur_default, weights=weights)
+                rnd_faults = fz.get("faults", []) or []
+                rb = {"kind": "run_bench", "duration_s": dur_default}
+                fs_effective = [{"kind": "parallel", "steps": [rb] + rnd_faults}]
+            except Exception:
+                fs_effective = fs_original
+        try:
+            uses_dm = any((f.get("kind") in ("dm_delay","dm_error")) for f in fs_effective)
+            if uses_dm:
+                os.environ.setdefault("KEEPER_PRIVILEGED", "1")
+                os.environ.setdefault("KEEPER_HOST_AUTO_PROVISION", "1")
+            # Relax log gate for known transient errors during chaos if not provided by env
+            os.environ.setdefault(
+                "KEEPER_LOG_ALLOW",
+                "failed to read rpc header.*End of file|DNS error|Not found address of host|Net Exception: Socket is not connected|CANNOT_READ_ALL_DATA|Cannot read all data|Unknown table.*system\\.trace_log|Unknown table expression identifier 'system\\.trace_log'"
+            )
+        except Exception:
+            pass
+        # compute run_id early for reproducible artifact paths
+        run_id=f"{scenario.get('id','')}-{run_meta.get('commit_sha','local')}-{uuid.uuid4().hex[:8]}"
+        # Use a unique cluster name per test to avoid instance-dir collisions
+        try:
+            cname = run_id.replace('/', '_').replace(' ', '_')
+            os.environ["KEEPER_CLUSTER_NAME"] = cname
+        except Exception:
+            pass
+        cluster, nodes = cluster_factory(topo, backend, opts)
+        summary={}; ctx={}
+        try:
+            try:
+                scenario_for_env = copy.deepcopy(scenario)
+                scenario_for_env["faults"] = fs_effective
+            except Exception:
+                scenario_for_env = scenario
+            ensure_environment(nodes, scenario_for_env)
+            single_leader(nodes)
+            leader=[n for n in nodes if is_leader(n)][0]
+            sink_url=request.config.getoption("--sink-url")
+            _snapshot_and_sink(nodes, "pre", scenario.get("id",""), topo, run_meta_eff, sink_url, run_id)
+            ctx["cluster"] = cluster
+            try:
+                ctx["faults_mode"] = request.config.getoption("--faults")
+            except Exception:
+                ctx["faults_mode"] = ctx.get("faults_mode", "on")
+            try:
+                ctx["log_allow"] = request.config.getoption("--log-allow") or ""
+            except Exception:
+                ctx["log_allow"] = ctx.get("log_allow", "")
+            # propagate seed if provided
+            try:
+                ctx["seed"] = int(request.config.getoption("--seed") or 0)
+            except Exception:
+                ctx["seed"] = 0
+            sampler=None
+            if sink_url:
+                interval=int(opts.get("monitor_interval_s", 5)) if isinstance(opts, dict) else 5
+                prom_allow = opts.get("prom_allow_prefixes") if isinstance(opts, dict) else None
+                sampler=MetricsSampler(nodes, run_meta_eff, scenario.get("id",""), topo, sink_url=sink_url, interval_s=interval, stage_prefix="run", run_id=run_id, prom_allow_prefixes=prom_allow, ctx=ctx)
+                sampler.start()
+            for step in scenario.get("pre", []): _apply_step(step, nodes, leader, ctx)
+            kb=None
+            if faults_mode != "random" and "workload" in scenario:
+                wl=scenario["workload"]
+                secure = False
+                kb=KeeperBench(
+                    nodes[0],
+                    servers_arg(nodes),
+                    cfg_path=str(WORKDIR/wl["config"]) if wl.get("config") else None,
+                    duration_s=wl.get("duration", request.config.getoption("--duration")),
+                    replay_path=wl.get("replay"),
+                    secure=secure,
+                )
+                ctx["workload"]=wl; ctx["bench_node"]=nodes[0]; ctx["bench_secure"]=secure; ctx["bench_servers"]=servers_arg(nodes)
+            for action in fs_effective: _apply_step(action, nodes, leader, ctx)
+            if kb:
+                summary = kb.run()
+            elif ctx.get("bench_summary"):
+                summary = ctx.get("bench_summary") or {}
+            for gate in scenario.get("gates", []): _apply_gate(gate, nodes, leader, ctx, summary)
+            if sink_url:
+                run_row={
+                    "run_id": run_id,
+                    "commit_sha": run_meta_eff.get("commit_sha","local"),
+                    "backend": backend,
+                    "scenario": scenario.get("id",""),
+                    "topology": topo,
+                    "summary_json": json.dumps(summary),
+                }
+                sink_clickhouse(sink_url, "keeper_bench_runs", [run_row])
+            _snapshot_and_sink(nodes, "post", scenario.get("id",""), topo, run_meta_eff, sink_url, run_id)
+            try:
+                from ci.praktika.cidb import CIDB
+                from ci.praktika.settings import Settings
+                from ci.praktika.info import Info
+                info = Info()
+                url_secret = info.get_secret(Settings.SECRET_CI_DB_URL)
+                user_secret = info.get_secret(Settings.SECRET_CI_DB_USER)
+                passwd_secret = info.get_secret(Settings.SECRET_CI_DB_PASSWORD)
+                url_w = user_w = pwd_w = None
+                if url_secret and user_secret and passwd_secret:
+                    url_w, user_w, pwd_w = url_secret.join_with(user_secret).join_with(passwd_secret).get_value()
+                else:
+                    try:
+                        url_w = os.environ.get("KEEPER_CIDB_URL", "").strip()
+                        user_w = os.environ.get("KEEPER_CIDB_USER", "").strip()
+                        pwd_w = os.environ.get("KEEPER_CIDB_PASSWORD", "").strip()
+                    except Exception:
+                        url_w = user_w = pwd_w = None
+                if url_w and user_w and pwd_w:
+                    if getattr(Settings, "KEEPER_CI_DB_DB_NAME", ""):
+                        Settings.CI_DB_DB_NAME = Settings.KEEPER_CI_DB_DB_NAME
+                    if getattr(Settings, "KEEPER_CI_DB_TABLE_NAME", ""):
+                        Settings.CI_DB_TABLE_NAME = Settings.KEEPER_CI_DB_TABLE_NAME
+                    if not Settings.CI_DB_TABLE_NAME:
+                        Settings.CI_DB_TABLE_NAME = "checks"
+                    job_name = os.environ.get("JOB_NAME", "keeper-stress").strip() or "keeper-stress"
+                    prn = 0
+                    try:
+                        prn = int(os.environ.get("PR_NUMBER", "0") or 0)
+                    except Exception:
+                        prn = 0
+                    status = "success"
+                    tdur_ms = int(max(0, (time.time() - start_ts)) * 1000)
+                    ts_str = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(start_ts))
+                    row = {
+                        "pull_request_number": prn,
+                        "commit_sha": run_meta_eff.get("commit_sha", "local"),
+                        "commit_url": "",
+                        "check_name": job_name,
+                        "check_status": status,
+                        "check_duration_ms": tdur_ms,
+                        "check_start_time": ts_str,
+                        "report_url": "",
+                        "pull_request_url": "",
+                        "base_ref": "",
+                        "base_repo": "",
+                        "head_ref": "",
+                        "head_repo": "",
+                        "task_url": "",
+                        "instance_type": "",
+                        "instance_id": "",
+                        "test_name": scenario.get("id", ""),
+                        "test_status": "OK",
+                        "test_duration_ms": tdur_ms,
+                        "test_context_raw": json.dumps(summary),
+                    }
+                    CIDB(url=url_w, user=user_w, passwd=pwd_w).insert_rows([json.dumps(row)])
+            except Exception:
+                pass
+        except Exception:
+            # Emit minimal reproducible scenario to a file for debugging
+            try:
+                repro_path = f"/tmp/keeper_repro_{run_id}.yaml"
+                with open(repro_path, "w", encoding="utf-8") as f:
+                    yaml.safe_dump(scenario, f, sort_keys=False)
+                print(f"[keeper] reproducible scenario written: {repro_path}")
+            except Exception:
+                pass
+            # Attempt to snapshot fail state as well
+            try:
+                sink_url=request.config.getoption("--sink-url")
+                _snapshot_and_sink(nodes, "fail", scenario.get("id",""), topo, run_meta_eff, sink_url, run_id)
+            except Exception:
+                pass
+            try:
+                from ci.praktika.cidb import CIDB
+                from ci.praktika.settings import Settings
+                from ci.praktika.info import Info
+                info = Info()
+&gt;               url_secret = info.get_secret(Settings.SECRET_CI_DB_URL)
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/stress/keeper/tests/test_scenarios.py:370: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+ci/praktika/info.py:142: in get_secret
+    return self.workflow.get_secret(name)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/tests/test_scenarios.py:274: in test_scenario
+    for action in fs_effective: _apply_step(action, nodes, leader, ctx)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/tests/test_scenarios.py:19: in _apply_step
+    apply_step_dispatcher(step, nodes, leader, ctx)
+tests/stress/keeper/framework/faults.py:174: in apply_step
+    return fault_registry[kind](ctx, nodes, leader, step)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/faults.py:306: in _f_ps_during
+    return impl(ctx, nodes, leader, step)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/faults_network.py:411: in _f_ps_during
+    apply_step(sub, nodes, leader, ctx)
+tests/stress/keeper/framework/faults.py:174: in apply_step
+    return fault_registry[kind](ctx, nodes, leader, step)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/faults.py:331: in _f_reconfig
+    cli = _get_cli(cluster, node, ctx)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/faults.py:38: in _get_cli
+    cli = ku.KeeperClient(cluster.server_bin_path, cluster.get_instance_ip(name), CLIENT_PORT)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/integration/helpers/keeper_utils.py:123: in __init__
+    self.get("/keeper", 60.0)
+tests/integration/helpers/keeper_utils.py:183: in get
+    return self.execute_query(f"get '{path}'", timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;helpers.keeper_utils.KeeperClient object at 0xfa1d380f9d30&gt;
+query = "get '/keeper'", timeout = 60.0
+
+    def execute_query(self, query: str, timeout: float = 60.0) -&gt; str:
+        output = io.BytesIO()
+    
+        self.proc.stdin.write(query.encode() + b"\n")
+        self.proc.stdin.flush()
+    
+        events = self.poller.poll(timeout)
+        if not events:
+            raise TimeoutError(f"Keeper client returned no output")
+    
+        for fd_num, event in events:
+            if event &amp; (select.EPOLLIN | select.EPOLLPRI):
+                file = self._fd_nums[fd_num]
+    
+                if file == self.proc.stdout:
+                    while True:
+                        chunk = file.readline()
+                        if chunk.endswith(self.SEPARATOR):
+                            break
+    
+                        output.write(chunk)
+    
+                elif file == self.proc.stderr:
+                    self.proc.stdout.readline()
+&gt;                   raise KeeperException(self.proc.stderr.readline().strip().decode())
+E                   helpers.keeper_utils.KeeperException: Coordination::Exception: All connection tries failed while connecting to ZooKeeper. nodes: 172.22.0.2:9181
+
+tests/integration/helpers/keeper_utils.py:165: KeeperException</failure></testcase><testcase classname="tests.stress.keeper.tests.test_scenarios" name="test_scenario[WEEKLY-GP3-JIT-LONG[default|t3]]" time="637.510"><failure message="AssertionError: dm_delay: mount failed: Command [docker exec -u root --privileged ubuntutestsweeklygp3jitlongdefaultt3local66236a6a-keeper3-1 bash -lc export PATH=&quot;$PATH:/usr/sbin:/sbin&quot;; mount -t ext4 -o rw,nodelalloc,data=writeback,noatime /dev/mapper/kdelay_keeper3 /mnt/kdelay_keeper3] return non-zero code 32: mount: /mnt/kdelay_keeper3: mount(2) system call failed: Structure needs cleaning.">node = &lt;helpers.cluster.ClickHouseInstance object at 0xfa1d381e3b90&gt;
+ms = 3
+
+    @contextmanager
+    def dm_delay(node, ms=3):
+        try:
+            suffix = getattr(node, "name", "node")
+            dm_name = f"kdelay_{suffix}"
+            img = f"/var/lib/keeper_delay_{suffix}.img"
+            backend_dev = ""
+            # Prefer RAM block device if present inside container
+            ram = sh(node, "ls -1 /dev/ram* 2&gt;/dev/null | head -n1 || true")['out'].strip()
+            if ram:
+                backend_dev = ram
+            else:
+                sh_root(node, f"rm -f {img} || true")
+                sh_root(node, f"dd if=/dev/zero of={img} bs=1M count=256")
+                # Ensure prior loop for this image is detached
+                sh_root(node, f"LOOP=$(losetup -j {img} | cut -d: -f1); [ -n \"$LOOP\" ] &amp;&amp; losetup -d $LOOP || true")
+                lo = sh_root(node, f"losetup -f --show {img}")['out'].strip()
+                backend_dev = lo
+            if not backend_dev:
+                if STRICT_FAULTS:
+                    raise AssertionError("dm_delay: cannot create loop device")
+                yield
+                return
+            sz = sh_root(node, f"blockdev --getsz {backend_dev}")['out'].strip()
+            sh_root(node, "umount /var/lib/clickhouse/coordination || true")
+            sh_root(node, f"dmsetup remove --retry -f {dm_name} || true")
+            sh(node, f"i=0; while dmsetup info {dm_name} &gt;/dev/null 2&gt;&amp;1 &amp;&amp; [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done")
+            sh_root(node, f"dmsetup create {dm_name} --table '0 {sz} delay {backend_dev} 0 {ms} {backend_dev} 0 {ms}'")
+            try:
+                sh(node, "pkill -STOP -x clickhouse || pkill -STOP clickhouse-server || true")
+                sh_root(node, f"dmsetup mknodes {dm_name} || dmsetup mknodes")
+                sh(node, f"i=0; while [ ! -e /dev/mapper/{dm_name} ] &amp;&amp; [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done; [ -e /dev/mapper/{dm_name} ] &amp;&amp; echo ok || (dmsetup info {dm_name} &amp;&amp; false)")
+                sh_root(node, "umount /var/lib/clickhouse/coordination || true")
+                sh_root(node, f"mkdir -p /var/lib/clickhouse/coordination /mnt/{dm_name} || true")
+                sh_root(node, f"wipefs -a /dev/mapper/{dm_name} || true")
+                sh_root(node, f"mkfs.ext4 -E nodiscard,lazy_itable_init=0,lazy_journal_init=0 -F /dev/mapper/{dm_name}")
+                sh_root(node, "sync || true; (command -v udevadm &gt;/dev/null 2&gt;&amp;1 &amp;&amp; udevadm settle) || true")
+                sh(node, f"i=0; while ! blkid /dev/mapper/{dm_name} &gt;/dev/null 2&gt;&amp;1 &amp;&amp; [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done")
+                sh(node, "sleep 0.3")
+&gt;               sh_root(node, f"mount -t ext4 -o rw,nodelalloc,data=writeback,noatime /dev/mapper/{dm_name} /mnt/{dm_name}")
+
+tests/stress/keeper/framework/faults_disk.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/stress/keeper/framework/util.py:7: in sh_root
+    return sh(node, f"export PATH=\"$PATH:/usr/sbin:/sbin\"; {cmd}", timeout=timeout, user="root", privileged=True)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/util.py:4: in sh
+    out = node.exec_in_container(["bash","-lc",cmd], attach=True, timeout=timeout, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/integration/helpers/cluster.py:4775: in exec_in_container
+    return self.cluster.exec_in_container(
+tests/integration/helpers/cluster.py:2458: in exec_in_container
+    result = subprocess_check_call(
+tests/integration/helpers/cluster.py:294: in subprocess_check_call
+    return run_and_check(args, detach=detach, nothrow=nothrow, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ['docker', 'exec', '-u', 'root', '--privileged', 'ubuntutestsweeklygp3jitlongdefaultt3local66236a6a-keeper3-1', ...]
+env = None, shell = False, stdout = -1, stderr = -1, timeout = 300
+nothrow = False, detach = False
+
+    def run_and_check(
+        args: Union[Sequence[str], str],
+        env=None,
+        shell=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=300,
+        nothrow=False,
+        detach=False,
+    ) -&gt; str:
+        if shell:
+            if isinstance(args, str):
+                shell_args = args
+            else:
+                shell_args = next(a for a in args)
+        else:
+            shell_args = " ".join(args)
+    
+        logging.debug("Command:[%s]", shell_args)
+        if detach:
+            subprocess.Popen(
+                args,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                shell=shell,
+            )
+            return ""
+    
+        res = subprocess.run(
+            args,
+            stdout=stdout,
+            stderr=stderr,
+            env=env,
+            shell=shell,
+            timeout=timeout,
+            check=False,
+        )
+        out = res.stdout.decode("utf-8", "ignore")
+        err = res.stderr.decode("utf-8", "ignore")
+        # check_call(...) from subprocess does not print stderr, so we do it manually
+        for outline in out.splitlines():
+            logging.debug("Stdout:%s", outline)
+        for errline in err.splitlines():
+            logging.debug("Stderr:%s", errline)
+        if res.returncode != 0:
+            logging.debug("Exitcode:%s", res.returncode)
+            if env:
+                logging.debug("Env:%s", env)
+            if not nothrow:
+&gt;               raise Exception(
+                    f"Command [{shell_args}] return non-zero code {res.returncode}: {res.stderr.decode('utf-8')}"
+                )
+E               Exception: Command [docker exec -u root --privileged ubuntutestsweeklygp3jitlongdefaultt3local66236a6a-keeper3-1 bash -lc export PATH="$PATH:/usr/sbin:/sbin"; mount -t ext4 -o rw,nodelalloc,data=writeback,noatime /dev/mapper/kdelay_keeper3 /mnt/kdelay_keeper3] return non-zero code 32: mount: /mnt/kdelay_keeper3: mount(2) system call failed: Structure needs cleaning.
+
+tests/integration/helpers/cluster.py:191: Exception
+
+During handling of the above exception, another exception occurred:
+
+scenario = {'backend': 'default', 'faults': [{'delay_ms': 10, 'duration_s': 600, 'jitter_ms': 10, 'kind': 'netem', ...}, {'durati...ype': 'p99_le'}, {'type': 'log_sanity_ok'}, {'type': 'health_precheck'}], 'id': 'WEEKLY-GP3-JIT-LONG[default|t3]', ...}
+cluster_factory = &lt;function cluster_factory.&lt;locals&gt;._make at 0xfa1d397e5b20&gt;
+request = &lt;FixtureRequest for &lt;Function test_scenario[WEEKLY-GP3-JIT-LONG[default|t3]]&gt;&gt;
+run_meta = {'backend': 'default', 'commit_sha': 'local'}
+
+    @pytest.mark.timeout(2400)
+    def test_scenario(scenario, cluster_factory, request, run_meta):
+        start_ts = time.time()
+        topo=scenario.get("topology",3)
+        flags=scenario.get("keeper_flags_xml","")
+        backend = scenario.get("backend") or request.config.getoption("--keeper-backend")
+        # Effective run_meta per test with the scenario-selected backend
+        run_meta_eff = dict(run_meta or {})
+        try:
+            run_meta_eff["backend"] = backend
+        except Exception:
+            pass
+        opts=scenario.get("opts", {})
+        try:
+            faults_mode = request.config.getoption("--faults")
+        except Exception:
+            faults_mode = os.environ.get("KEEPER_FAULTS", "on")
+        try:
+            rnd_count = int(request.config.getoption("--random-faults-count") or 1)
+        except Exception:
+            rnd_count = int(os.environ.get("KEEPER_RANDOM_FAULTS_COUNT", "1"))
+        try:
+            seed_val = int(request.config.getoption("--seed") or 0)
+        except Exception:
+            seed_val = 0
+        fs_original = scenario.get("faults", []) or []
+        fs_effective = fs_original
+        if faults_mode == "off":
+            fs_effective = []
+        elif faults_mode == "random":
+            try:
+                dur_default = int((scenario.get("workload") or {}).get("duration") or request.config.getoption("--duration"))
+            except Exception:
+                dur_default = int(os.environ.get("KEEPER_DURATION", "120"))
+            if seed_val &lt;= 0:
+                import os as _os
+                seed_val = int.from_bytes(_os.urandom(4), 'big')
+            try:
+                try:
+                    inc_raw = request.config.getoption("--random-faults-include") or os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                except Exception:
+                    inc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                try:
+                    exc_raw = request.config.getoption("--random-faults-exclude") or os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                except Exception:
+                    exc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                inc = set([x.strip() for x in (inc_raw or "").split(",") if x.strip()])
+                exc = set([x.strip() for x in (exc_raw or "").split(",") if x.strip()])
+                cands = [k for k in list(getattr(fault_registry, 'keys', lambda: [])()) if k not in _FUZZ_EXCLUDE]
+                if not cands and isinstance(fault_registry, dict):
+                    cands = [k for k in fault_registry.keys() if k not in _FUZZ_EXCLUDE]
+                weights = {}
+                if inc:
+                    for k in cands:
+                        weights[k] = 1 if k in inc else 0
+                else:
+                    for k in cands:
+                        weights[k] = 0 if k in exc else 1
+                fz = generate_fuzz_scenario(seed_val, max(1, rnd_count), dur_default, weights=weights)
+                rnd_faults = fz.get("faults", []) or []
+                rb = {"kind": "run_bench", "duration_s": dur_default}
+                fs_effective = [{"kind": "parallel", "steps": [rb] + rnd_faults}]
+            except Exception:
+                fs_effective = fs_original
+        try:
+            uses_dm = any((f.get("kind") in ("dm_delay","dm_error")) for f in fs_effective)
+            if uses_dm:
+                os.environ.setdefault("KEEPER_PRIVILEGED", "1")
+                os.environ.setdefault("KEEPER_HOST_AUTO_PROVISION", "1")
+            # Relax log gate for known transient errors during chaos if not provided by env
+            os.environ.setdefault(
+                "KEEPER_LOG_ALLOW",
+                "failed to read rpc header.*End of file|DNS error|Not found address of host|Net Exception: Socket is not connected|CANNOT_READ_ALL_DATA|Cannot read all data|Unknown table.*system\\.trace_log|Unknown table expression identifier 'system\\.trace_log'"
+            )
+        except Exception:
+            pass
+        # compute run_id early for reproducible artifact paths
+        run_id=f"{scenario.get('id','')}-{run_meta.get('commit_sha','local')}-{uuid.uuid4().hex[:8]}"
+        # Use a unique cluster name per test to avoid instance-dir collisions
+        try:
+            cname = run_id.replace('/', '_').replace(' ', '_')
+            os.environ["KEEPER_CLUSTER_NAME"] = cname
+        except Exception:
+            pass
+        cluster, nodes = cluster_factory(topo, backend, opts)
+        summary={}; ctx={}
+        try:
+            try:
+                scenario_for_env = copy.deepcopy(scenario)
+                scenario_for_env["faults"] = fs_effective
+            except Exception:
+                scenario_for_env = scenario
+            ensure_environment(nodes, scenario_for_env)
+            single_leader(nodes)
+            leader=[n for n in nodes if is_leader(n)][0]
+            sink_url=request.config.getoption("--sink-url")
+            _snapshot_and_sink(nodes, "pre", scenario.get("id",""), topo, run_meta_eff, sink_url, run_id)
+            ctx["cluster"] = cluster
+            try:
+                ctx["faults_mode"] = request.config.getoption("--faults")
+            except Exception:
+                ctx["faults_mode"] = ctx.get("faults_mode", "on")
+            try:
+                ctx["log_allow"] = request.config.getoption("--log-allow") or ""
+            except Exception:
+                ctx["log_allow"] = ctx.get("log_allow", "")
+            # propagate seed if provided
+            try:
+                ctx["seed"] = int(request.config.getoption("--seed") or 0)
+            except Exception:
+                ctx["seed"] = 0
+            sampler=None
+            if sink_url:
+                interval=int(opts.get("monitor_interval_s", 5)) if isinstance(opts, dict) else 5
+                prom_allow = opts.get("prom_allow_prefixes") if isinstance(opts, dict) else None
+                sampler=MetricsSampler(nodes, run_meta_eff, scenario.get("id",""), topo, sink_url=sink_url, interval_s=interval, stage_prefix="run", run_id=run_id, prom_allow_prefixes=prom_allow, ctx=ctx)
+                sampler.start()
+            for step in scenario.get("pre", []): _apply_step(step, nodes, leader, ctx)
+            kb=None
+            if faults_mode != "random" and "workload" in scenario:
+                wl=scenario["workload"]
+                secure = False
+                kb=KeeperBench(
+                    nodes[0],
+                    servers_arg(nodes),
+                    cfg_path=str(WORKDIR/wl["config"]) if wl.get("config") else None,
+                    duration_s=wl.get("duration", request.config.getoption("--duration")),
+                    replay_path=wl.get("replay"),
+                    secure=secure,
+                )
+                ctx["workload"]=wl; ctx["bench_node"]=nodes[0]; ctx["bench_secure"]=secure; ctx["bench_servers"]=servers_arg(nodes)
+            for action in fs_effective: _apply_step(action, nodes, leader, ctx)
+            if kb:
+                summary = kb.run()
+            elif ctx.get("bench_summary"):
+                summary = ctx.get("bench_summary") or {}
+            for gate in scenario.get("gates", []): _apply_gate(gate, nodes, leader, ctx, summary)
+            if sink_url:
+                run_row={
+                    "run_id": run_id,
+                    "commit_sha": run_meta_eff.get("commit_sha","local"),
+                    "backend": backend,
+                    "scenario": scenario.get("id",""),
+                    "topology": topo,
+                    "summary_json": json.dumps(summary),
+                }
+                sink_clickhouse(sink_url, "keeper_bench_runs", [run_row])
+            _snapshot_and_sink(nodes, "post", scenario.get("id",""), topo, run_meta_eff, sink_url, run_id)
+            try:
+                from ci.praktika.cidb import CIDB
+                from ci.praktika.settings import Settings
+                from ci.praktika.info import Info
+                info = Info()
+                url_secret = info.get_secret(Settings.SECRET_CI_DB_URL)
+                user_secret = info.get_secret(Settings.SECRET_CI_DB_USER)
+                passwd_secret = info.get_secret(Settings.SECRET_CI_DB_PASSWORD)
+                url_w = user_w = pwd_w = None
+                if url_secret and user_secret and passwd_secret:
+                    url_w, user_w, pwd_w = url_secret.join_with(user_secret).join_with(passwd_secret).get_value()
+                else:
+                    try:
+                        url_w = os.environ.get("KEEPER_CIDB_URL", "").strip()
+                        user_w = os.environ.get("KEEPER_CIDB_USER", "").strip()
+                        pwd_w = os.environ.get("KEEPER_CIDB_PASSWORD", "").strip()
+                    except Exception:
+                        url_w = user_w = pwd_w = None
+                if url_w and user_w and pwd_w:
+                    if getattr(Settings, "KEEPER_CI_DB_DB_NAME", ""):
+                        Settings.CI_DB_DB_NAME = Settings.KEEPER_CI_DB_DB_NAME
+                    if getattr(Settings, "KEEPER_CI_DB_TABLE_NAME", ""):
+                        Settings.CI_DB_TABLE_NAME = Settings.KEEPER_CI_DB_TABLE_NAME
+                    if not Settings.CI_DB_TABLE_NAME:
+                        Settings.CI_DB_TABLE_NAME = "checks"
+                    job_name = os.environ.get("JOB_NAME", "keeper-stress").strip() or "keeper-stress"
+                    prn = 0
+                    try:
+                        prn = int(os.environ.get("PR_NUMBER", "0") or 0)
+                    except Exception:
+                        prn = 0
+                    status = "success"
+                    tdur_ms = int(max(0, (time.time() - start_ts)) * 1000)
+                    ts_str = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(start_ts))
+                    row = {
+                        "pull_request_number": prn,
+                        "commit_sha": run_meta_eff.get("commit_sha", "local"),
+                        "commit_url": "",
+                        "check_name": job_name,
+                        "check_status": status,
+                        "check_duration_ms": tdur_ms,
+                        "check_start_time": ts_str,
+                        "report_url": "",
+                        "pull_request_url": "",
+                        "base_ref": "",
+                        "base_repo": "",
+                        "head_ref": "",
+                        "head_repo": "",
+                        "task_url": "",
+                        "instance_type": "",
+                        "instance_id": "",
+                        "test_name": scenario.get("id", ""),
+                        "test_status": "OK",
+                        "test_duration_ms": tdur_ms,
+                        "test_context_raw": json.dumps(summary),
+                    }
+                    CIDB(url=url_w, user=user_w, passwd=pwd_w).insert_rows([json.dumps(row)])
+            except Exception:
+                pass
+        except Exception:
+            # Emit minimal reproducible scenario to a file for debugging
+            try:
+                repro_path = f"/tmp/keeper_repro_{run_id}.yaml"
+                with open(repro_path, "w", encoding="utf-8") as f:
+                    yaml.safe_dump(scenario, f, sort_keys=False)
+                print(f"[keeper] reproducible scenario written: {repro_path}")
+            except Exception:
+                pass
+            # Attempt to snapshot fail state as well
+            try:
+                sink_url=request.config.getoption("--sink-url")
+                _snapshot_and_sink(nodes, "fail", scenario.get("id",""), topo, run_meta_eff, sink_url, run_id)
+            except Exception:
+                pass
+            try:
+                from ci.praktika.cidb import CIDB
+                from ci.praktika.settings import Settings
+                from ci.praktika.info import Info
+                info = Info()
+&gt;               url_secret = info.get_secret(Settings.SECRET_CI_DB_URL)
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/stress/keeper/tests/test_scenarios.py:370: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+ci/praktika/info.py:142: in get_secret
+    return self.workflow.get_secret(name)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/tests/test_scenarios.py:274: in test_scenario
+    for action in fs_effective: _apply_step(action, nodes, leader, ctx)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/tests/test_scenarios.py:19: in _apply_step
+    apply_step_dispatcher(step, nodes, leader, ctx)
+tests/stress/keeper/framework/faults.py:174: in apply_step
+    return fault_registry[kind](ctx, nodes, leader, step)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/faults.py:256: in _f_dm_delay
+    return impl(ctx, nodes, leader, step)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/faults_disk.py:153: in _f_dm_delay
+    _for_each_target(step, nodes, leader, _run_one)
+tests/stress/keeper/framework/faults_disk.py:27: in _for_each_target
+    raise errors[0]
+tests/stress/keeper/framework/faults_disk.py:17: in _wrap
+    run_one(t)
+tests/stress/keeper/framework/faults_disk.py:150: in _run_one
+    with dm_delay(t, step.get("ms", 3)):
+/usr/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+node = &lt;helpers.cluster.ClickHouseInstance object at 0xfa1d381e3b90&gt;
+ms = 3
+
+    @contextmanager
+    def dm_delay(node, ms=3):
+        try:
+            suffix = getattr(node, "name", "node")
+            dm_name = f"kdelay_{suffix}"
+            img = f"/var/lib/keeper_delay_{suffix}.img"
+            backend_dev = ""
+            # Prefer RAM block device if present inside container
+            ram = sh(node, "ls -1 /dev/ram* 2&gt;/dev/null | head -n1 || true")['out'].strip()
+            if ram:
+                backend_dev = ram
+            else:
+                sh_root(node, f"rm -f {img} || true")
+                sh_root(node, f"dd if=/dev/zero of={img} bs=1M count=256")
+                # Ensure prior loop for this image is detached
+                sh_root(node, f"LOOP=$(losetup -j {img} | cut -d: -f1); [ -n \"$LOOP\" ] &amp;&amp; losetup -d $LOOP || true")
+                lo = sh_root(node, f"losetup -f --show {img}")['out'].strip()
+                backend_dev = lo
+            if not backend_dev:
+                if STRICT_FAULTS:
+                    raise AssertionError("dm_delay: cannot create loop device")
+                yield
+                return
+            sz = sh_root(node, f"blockdev --getsz {backend_dev}")['out'].strip()
+            sh_root(node, "umount /var/lib/clickhouse/coordination || true")
+            sh_root(node, f"dmsetup remove --retry -f {dm_name} || true")
+            sh(node, f"i=0; while dmsetup info {dm_name} &gt;/dev/null 2&gt;&amp;1 &amp;&amp; [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done")
+            sh_root(node, f"dmsetup create {dm_name} --table '0 {sz} delay {backend_dev} 0 {ms} {backend_dev} 0 {ms}'")
+            try:
+                sh(node, "pkill -STOP -x clickhouse || pkill -STOP clickhouse-server || true")
+                sh_root(node, f"dmsetup mknodes {dm_name} || dmsetup mknodes")
+                sh(node, f"i=0; while [ ! -e /dev/mapper/{dm_name} ] &amp;&amp; [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done; [ -e /dev/mapper/{dm_name} ] &amp;&amp; echo ok || (dmsetup info {dm_name} &amp;&amp; false)")
+                sh_root(node, "umount /var/lib/clickhouse/coordination || true")
+                sh_root(node, f"mkdir -p /var/lib/clickhouse/coordination /mnt/{dm_name} || true")
+                sh_root(node, f"wipefs -a /dev/mapper/{dm_name} || true")
+                sh_root(node, f"mkfs.ext4 -E nodiscard,lazy_itable_init=0,lazy_journal_init=0 -F /dev/mapper/{dm_name}")
+                sh_root(node, "sync || true; (command -v udevadm &gt;/dev/null 2&gt;&amp;1 &amp;&amp; udevadm settle) || true")
+                sh(node, f"i=0; while ! blkid /dev/mapper/{dm_name} &gt;/dev/null 2&gt;&amp;1 &amp;&amp; [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done")
+                sh(node, "sleep 0.3")
+                sh_root(node, f"mount -t ext4 -o rw,nodelalloc,data=writeback,noatime /dev/mapper/{dm_name} /mnt/{dm_name}")
+                sh_root(node, f"mount --bind /mnt/{dm_name} /var/lib/clickhouse/coordination")
+            except Exception as e:
+                if STRICT_FAULTS:
+&gt;                   raise AssertionError(f"dm_delay: mount failed: {e}")
+E                   AssertionError: dm_delay: mount failed: Command [docker exec -u root --privileged ubuntutestsweeklygp3jitlongdefaultt3local66236a6a-keeper3-1 bash -lc export PATH="$PATH:/usr/sbin:/sbin"; mount -t ext4 -o rw,nodelalloc,data=writeback,noatime /dev/mapper/kdelay_keeper3 /mnt/kdelay_keeper3] return non-zero code 32: mount: /mnt/kdelay_keeper3: mount(2) system call failed: Structure needs cleaning.
+
+tests/stress/keeper/framework/faults_disk.py:76: AssertionError</failure></testcase><testcase classname="tests.stress.keeper.tests.test_scenarios" name="test_scenario[WEEKLY-GP3-JIT-LONG[rocksdb|t3]]" time="1243.079"><failure message="AssertionError: expected: no critical errors in logs; observed: hits=1; context: keeper3:Fatal:Logical error: 'ReadBuffer is canceled. Can't read from it.'.">scenario = {'backend': 'rocksdb', 'faults': [{'delay_ms': 10, 'duration_s': 600, 'jitter_ms': 10, 'kind': 'netem', ...}, {'durati...ype': 'p99_le'}, {'type': 'log_sanity_ok'}, {'type': 'health_precheck'}], 'id': 'WEEKLY-GP3-JIT-LONG[rocksdb|t3]', ...}
+cluster_factory = &lt;function cluster_factory.&lt;locals&gt;._make at 0xfa1d397e7c40&gt;
+request = &lt;FixtureRequest for &lt;Function test_scenario[WEEKLY-GP3-JIT-LONG[rocksdb|t3]]&gt;&gt;
+run_meta = {'backend': 'default', 'commit_sha': 'local'}
+
+    @pytest.mark.timeout(2400)
+    def test_scenario(scenario, cluster_factory, request, run_meta):
+        start_ts = time.time()
+        topo=scenario.get("topology",3)
+        flags=scenario.get("keeper_flags_xml","")
+        backend = scenario.get("backend") or request.config.getoption("--keeper-backend")
+        # Effective run_meta per test with the scenario-selected backend
+        run_meta_eff = dict(run_meta or {})
+        try:
+            run_meta_eff["backend"] = backend
+        except Exception:
+            pass
+        opts=scenario.get("opts", {})
+        try:
+            faults_mode = request.config.getoption("--faults")
+        except Exception:
+            faults_mode = os.environ.get("KEEPER_FAULTS", "on")
+        try:
+            rnd_count = int(request.config.getoption("--random-faults-count") or 1)
+        except Exception:
+            rnd_count = int(os.environ.get("KEEPER_RANDOM_FAULTS_COUNT", "1"))
+        try:
+            seed_val = int(request.config.getoption("--seed") or 0)
+        except Exception:
+            seed_val = 0
+        fs_original = scenario.get("faults", []) or []
+        fs_effective = fs_original
+        if faults_mode == "off":
+            fs_effective = []
+        elif faults_mode == "random":
+            try:
+                dur_default = int((scenario.get("workload") or {}).get("duration") or request.config.getoption("--duration"))
+            except Exception:
+                dur_default = int(os.environ.get("KEEPER_DURATION", "120"))
+            if seed_val &lt;= 0:
+                import os as _os
+                seed_val = int.from_bytes(_os.urandom(4), 'big')
+            try:
+                try:
+                    inc_raw = request.config.getoption("--random-faults-include") or os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                except Exception:
+                    inc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                try:
+                    exc_raw = request.config.getoption("--random-faults-exclude") or os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                except Exception:
+                    exc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                inc = set([x.strip() for x in (inc_raw or "").split(",") if x.strip()])
+                exc = set([x.strip() for x in (exc_raw or "").split(",") if x.strip()])
+                cands = [k for k in list(getattr(fault_registry, 'keys', lambda: [])()) if k not in _FUZZ_EXCLUDE]
+                if not cands and isinstance(fault_registry, dict):
+                    cands = [k for k in fault_registry.keys() if k not in _FUZZ_EXCLUDE]
+                weights = {}
+                if inc:
+                    for k in cands:
+                        weights[k] = 1 if k in inc else 0
+                else:
+                    for k in cands:
+                        weights[k] = 0 if k in exc else 1
+                fz = generate_fuzz_scenario(seed_val, max(1, rnd_count), dur_default, weights=weights)
+                rnd_faults = fz.get("faults", []) or []
+                rb = {"kind": "run_bench", "duration_s": dur_default}
+                fs_effective = [{"kind": "parallel", "steps": [rb] + rnd_faults}]
+            except Exception:
+                fs_effective = fs_original
+        try:
+            uses_dm = any((f.get("kind") in ("dm_delay","dm_error")) for f in fs_effective)
+            if uses_dm:
+                os.environ.setdefault("KEEPER_PRIVILEGED", "1")
+                os.environ.setdefault("KEEPER_HOST_AUTO_PROVISION", "1")
+            # Relax log gate for known transient errors during chaos if not provided by env
+            os.environ.setdefault(
+                "KEEPER_LOG_ALLOW",
+                "failed to read rpc header.*End of file|DNS error|Not found address of host|Net Exception: Socket is not connected|CANNOT_READ_ALL_DATA|Cannot read all data|Unknown table.*system\\.trace_log|Unknown table expression identifier 'system\\.trace_log'"
+            )
+        except Exception:
+            pass
+        # compute run_id early for reproducible artifact paths
+        run_id=f"{scenario.get('id','')}-{run_meta.get('commit_sha','local')}-{uuid.uuid4().hex[:8]}"
+        # Use a unique cluster name per test to avoid instance-dir collisions
+        try:
+            cname = run_id.replace('/', '_').replace(' ', '_')
+            os.environ["KEEPER_CLUSTER_NAME"] = cname
+        except Exception:
+            pass
+        cluster, nodes = cluster_factory(topo, backend, opts)
+        summary={}; ctx={}
+        try:
+            try:
+                scenario_for_env = copy.deepcopy(scenario)
+                scenario_for_env["faults"] = fs_effective
+            except Exception:
+                scenario_for_env = scenario
+            ensure_environment(nodes, scenario_for_env)
+            single_leader(nodes)
+            leader=[n for n in nodes if is_leader(n)][0]
+            sink_url=request.config.getoption("--sink-url")
+            _snapshot_and_sink(nodes, "pre", scenario.get("id",""), topo, run_meta_eff, sink_url, run_id)
+            ctx["cluster"] = cluster
+            try:
+                ctx["faults_mode"] = request.config.getoption("--faults")
+            except Exception:
+                ctx["faults_mode"] = ctx.get("faults_mode", "on")
+            try:
+                ctx["log_allow"] = request.config.getoption("--log-allow") or ""
+            except Exception:
+                ctx["log_allow"] = ctx.get("log_allow", "")
+            # propagate seed if provided
+            try:
+                ctx["seed"] = int(request.config.getoption("--seed") or 0)
+            except Exception:
+                ctx["seed"] = 0
+            sampler=None
+            if sink_url:
+                interval=int(opts.get("monitor_interval_s", 5)) if isinstance(opts, dict) else 5
+                prom_allow = opts.get("prom_allow_prefixes") if isinstance(opts, dict) else None
+                sampler=MetricsSampler(nodes, run_meta_eff, scenario.get("id",""), topo, sink_url=sink_url, interval_s=interval, stage_prefix="run", run_id=run_id, prom_allow_prefixes=prom_allow, ctx=ctx)
+                sampler.start()
+            for step in scenario.get("pre", []): _apply_step(step, nodes, leader, ctx)
+            kb=None
+            if faults_mode != "random" and "workload" in scenario:
+                wl=scenario["workload"]
+                secure = False
+                kb=KeeperBench(
+                    nodes[0],
+                    servers_arg(nodes),
+                    cfg_path=str(WORKDIR/wl["config"]) if wl.get("config") else None,
+                    duration_s=wl.get("duration", request.config.getoption("--duration")),
+                    replay_path=wl.get("replay"),
+                    secure=secure,
+                )
+                ctx["workload"]=wl; ctx["bench_node"]=nodes[0]; ctx["bench_secure"]=secure; ctx["bench_servers"]=servers_arg(nodes)
+            for action in fs_effective: _apply_step(action, nodes, leader, ctx)
+            if kb:
+                summary = kb.run()
+            elif ctx.get("bench_summary"):
+                summary = ctx.get("bench_summary") or {}
+            for gate in scenario.get("gates", []): _apply_gate(gate, nodes, leader, ctx, summary)
+            if sink_url:
+                run_row={
+                    "run_id": run_id,
+                    "commit_sha": run_meta_eff.get("commit_sha","local"),
+                    "backend": backend,
+                    "scenario": scenario.get("id",""),
+                    "topology": topo,
+                    "summary_json": json.dumps(summary),
+                }
+                sink_clickhouse(sink_url, "keeper_bench_runs", [run_row])
+            _snapshot_and_sink(nodes, "post", scenario.get("id",""), topo, run_meta_eff, sink_url, run_id)
+            try:
+                from ci.praktika.cidb import CIDB
+                from ci.praktika.settings import Settings
+                from ci.praktika.info import Info
+                info = Info()
+                url_secret = info.get_secret(Settings.SECRET_CI_DB_URL)
+                user_secret = info.get_secret(Settings.SECRET_CI_DB_USER)
+                passwd_secret = info.get_secret(Settings.SECRET_CI_DB_PASSWORD)
+                url_w = user_w = pwd_w = None
+                if url_secret and user_secret and passwd_secret:
+                    url_w, user_w, pwd_w = url_secret.join_with(user_secret).join_with(passwd_secret).get_value()
+                else:
+                    try:
+                        url_w = os.environ.get("KEEPER_CIDB_URL", "").strip()
+                        user_w = os.environ.get("KEEPER_CIDB_USER", "").strip()
+                        pwd_w = os.environ.get("KEEPER_CIDB_PASSWORD", "").strip()
+                    except Exception:
+                        url_w = user_w = pwd_w = None
+                if url_w and user_w and pwd_w:
+                    if getattr(Settings, "KEEPER_CI_DB_DB_NAME", ""):
+                        Settings.CI_DB_DB_NAME = Settings.KEEPER_CI_DB_DB_NAME
+                    if getattr(Settings, "KEEPER_CI_DB_TABLE_NAME", ""):
+                        Settings.CI_DB_TABLE_NAME = Settings.KEEPER_CI_DB_TABLE_NAME
+                    if not Settings.CI_DB_TABLE_NAME:
+                        Settings.CI_DB_TABLE_NAME = "checks"
+                    job_name = os.environ.get("JOB_NAME", "keeper-stress").strip() or "keeper-stress"
+                    prn = 0
+                    try:
+                        prn = int(os.environ.get("PR_NUMBER", "0") or 0)
+                    except Exception:
+                        prn = 0
+                    status = "success"
+                    tdur_ms = int(max(0, (time.time() - start_ts)) * 1000)
+                    ts_str = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(start_ts))
+                    row = {
+                        "pull_request_number": prn,
+                        "commit_sha": run_meta_eff.get("commit_sha", "local"),
+                        "commit_url": "",
+                        "check_name": job_name,
+                        "check_status": status,
+                        "check_duration_ms": tdur_ms,
+                        "check_start_time": ts_str,
+                        "report_url": "",
+                        "pull_request_url": "",
+                        "base_ref": "",
+                        "base_repo": "",
+                        "head_ref": "",
+                        "head_repo": "",
+                        "task_url": "",
+                        "instance_type": "",
+                        "instance_id": "",
+                        "test_name": scenario.get("id", ""),
+                        "test_status": "OK",
+                        "test_duration_ms": tdur_ms,
+                        "test_context_raw": json.dumps(summary),
+                    }
+                    CIDB(url=url_w, user=user_w, passwd=pwd_w).insert_rows([json.dumps(row)])
+            except Exception:
+                pass
+        except Exception:
+            # Emit minimal reproducible scenario to a file for debugging
+            try:
+                repro_path = f"/tmp/keeper_repro_{run_id}.yaml"
+                with open(repro_path, "w", encoding="utf-8") as f:
+                    yaml.safe_dump(scenario, f, sort_keys=False)
+                print(f"[keeper] reproducible scenario written: {repro_path}")
+            except Exception:
+                pass
+            # Attempt to snapshot fail state as well
+            try:
+                sink_url=request.config.getoption("--sink-url")
+                _snapshot_and_sink(nodes, "fail", scenario.get("id",""), topo, run_meta_eff, sink_url, run_id)
+            except Exception:
+                pass
+            try:
+                from ci.praktika.cidb import CIDB
+                from ci.praktika.settings import Settings
+                from ci.praktika.info import Info
+                info = Info()
+&gt;               url_secret = info.get_secret(Settings.SECRET_CI_DB_URL)
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/stress/keeper/tests/test_scenarios.py:370: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+ci/praktika/info.py:142: in get_secret
+    return self.workflow.get_secret(name)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/tests/test_scenarios.py:279: in test_scenario
+    for gate in scenario.get("gates", []): _apply_gate(gate, nodes, leader, ctx, summary)
+                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/tests/test_scenarios.py:22: in _apply_gate
+    apply_gate(gate, nodes, leader, ctx, summary)
+tests/stress/keeper/framework/gates.py:505: in apply_gate
+    fn(ctx, nodes, leader, gate, summary)
+tests/stress/keeper/framework/gates.py:466: in _g_log_sanity
+    expect(len(hits) == 0, expected="no critical errors in logs", observed=f"hits={len(hits)}", context=("; ".join(f"{h[0]}:{h[2]}:{h[3]}" for h in hits[:5])))
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+condition = False, expected = 'no critical errors in logs'
+observed = 'hits=1'
+context = "keeper3:Fatal:Logical error: 'ReadBuffer is canceled. Can't read from it.'."
+
+    def expect(condition: bool, expected: str, observed: str = "", context: str = ""):
+        if condition:
+            return
+        parts = [f"expected: {expected}"]
+        if observed:
+            parts.append(f"observed: {observed}")
+        if context:
+            parts.append(f"context: {context}")
+        msg = "; ".join(parts)
+&gt;       raise AssertionError(msg)
+E       AssertionError: expected: no critical errors in logs; observed: hits=1; context: keeper3:Fatal:Logical error: 'ReadBuffer is canceled. Can't read from it.'.
+
+tests/stress/keeper/framework/expect.py:10: AssertionError</failure></testcase><testcase classname="tests.stress.keeper.tests.test_scenarios" name="test_scenario[WEEKLY-RCFG-PART-NEG[default|t3]]" time="57.807"><failure message="helpers.keeper_utils.KeeperException: Coordination::Exception: All connection tries failed while connecting to ZooKeeper. nodes: 172.22.0.4:9181">scenario = {'backend': 'default', 'faults': [{'kind': 'partition_symmetric_during', 'on': 'leader', 'steps': [{'kind': 'reconfig'...o': 0.05, 'type': 'error_rate_le'}, {'max_ms': 5000, 'type': 'p99_le'}], 'id': 'WEEKLY-RCFG-PART-NEG[default|t3]', ...}
+cluster_factory = &lt;function cluster_factory.&lt;locals&gt;._make at 0xfa1d397e6480&gt;
+request = &lt;FixtureRequest for &lt;Function test_scenario[WEEKLY-RCFG-PART-NEG[default|t3]]&gt;&gt;
+run_meta = {'backend': 'default', 'commit_sha': 'local'}
+
+    @pytest.mark.timeout(2400)
+    def test_scenario(scenario, cluster_factory, request, run_meta):
+        start_ts = time.time()
+        topo=scenario.get("topology",3)
+        flags=scenario.get("keeper_flags_xml","")
+        backend = scenario.get("backend") or request.config.getoption("--keeper-backend")
+        # Effective run_meta per test with the scenario-selected backend
+        run_meta_eff = dict(run_meta or {})
+        try:
+            run_meta_eff["backend"] = backend
+        except Exception:
+            pass
+        opts=scenario.get("opts", {})
+        try:
+            faults_mode = request.config.getoption("--faults")
+        except Exception:
+            faults_mode = os.environ.get("KEEPER_FAULTS", "on")
+        try:
+            rnd_count = int(request.config.getoption("--random-faults-count") or 1)
+        except Exception:
+            rnd_count = int(os.environ.get("KEEPER_RANDOM_FAULTS_COUNT", "1"))
+        try:
+            seed_val = int(request.config.getoption("--seed") or 0)
+        except Exception:
+            seed_val = 0
+        fs_original = scenario.get("faults", []) or []
+        fs_effective = fs_original
+        if faults_mode == "off":
+            fs_effective = []
+        elif faults_mode == "random":
+            try:
+                dur_default = int((scenario.get("workload") or {}).get("duration") or request.config.getoption("--duration"))
+            except Exception:
+                dur_default = int(os.environ.get("KEEPER_DURATION", "120"))
+            if seed_val &lt;= 0:
+                import os as _os
+                seed_val = int.from_bytes(_os.urandom(4), 'big')
+            try:
+                try:
+                    inc_raw = request.config.getoption("--random-faults-include") or os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                except Exception:
+                    inc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                try:
+                    exc_raw = request.config.getoption("--random-faults-exclude") or os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                except Exception:
+                    exc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                inc = set([x.strip() for x in (inc_raw or "").split(",") if x.strip()])
+                exc = set([x.strip() for x in (exc_raw or "").split(",") if x.strip()])
+                cands = [k for k in list(getattr(fault_registry, 'keys', lambda: [])()) if k not in _FUZZ_EXCLUDE]
+                if not cands and isinstance(fault_registry, dict):
+                    cands = [k for k in fault_registry.keys() if k not in _FUZZ_EXCLUDE]
+                weights = {}
+                if inc:
+                    for k in cands:
+                        weights[k] = 1 if k in inc else 0
+                else:
+                    for k in cands:
+                        weights[k] = 0 if k in exc else 1
+                fz = generate_fuzz_scenario(seed_val, max(1, rnd_count), dur_default, weights=weights)
+                rnd_faults = fz.get("faults", []) or []
+                rb = {"kind": "run_bench", "duration_s": dur_default}
+                fs_effective = [{"kind": "parallel", "steps": [rb] + rnd_faults}]
+            except Exception:
+                fs_effective = fs_original
+        try:
+            uses_dm = any((f.get("kind") in ("dm_delay","dm_error")) for f in fs_effective)
+            if uses_dm:
+                os.environ.setdefault("KEEPER_PRIVILEGED", "1")
+                os.environ.setdefault("KEEPER_HOST_AUTO_PROVISION", "1")
+            # Relax log gate for known transient errors during chaos if not provided by env
+            os.environ.setdefault(
+                "KEEPER_LOG_ALLOW",
+                "failed to read rpc header.*End of file|DNS error|Not found address of host|Net Exception: Socket is not connected|CANNOT_READ_ALL_DATA|Cannot read all data|Unknown table.*system\\.trace_log|Unknown table expression identifier 'system\\.trace_log'"
+            )
+        except Exception:
+            pass
+        # compute run_id early for reproducible artifact paths
+        run_id=f"{scenario.get('id','')}-{run_meta.get('commit_sha','local')}-{uuid.uuid4().hex[:8]}"
+        # Use a unique cluster name per test to avoid instance-dir collisions
+        try:
+            cname = run_id.replace('/', '_').replace(' ', '_')
+            os.environ["KEEPER_CLUSTER_NAME"] = cname
+        except Exception:
+            pass
+        cluster, nodes = cluster_factory(topo, backend, opts)
+        summary={}; ctx={}
+        try:
+            try:
+                scenario_for_env = copy.deepcopy(scenario)
+                scenario_for_env["faults"] = fs_effective
+            except Exception:
+                scenario_for_env = scenario
+            ensure_environment(nodes, scenario_for_env)
+            single_leader(nodes)
+            leader=[n for n in nodes if is_leader(n)][0]
+            sink_url=request.config.getoption("--sink-url")
+            _snapshot_and_sink(nodes, "pre", scenario.get("id",""), topo, run_meta_eff, sink_url, run_id)
+            ctx["cluster"] = cluster
+            try:
+                ctx["faults_mode"] = request.config.getoption("--faults")
+            except Exception:
+                ctx["faults_mode"] = ctx.get("faults_mode", "on")
+            try:
+                ctx["log_allow"] = request.config.getoption("--log-allow") or ""
+            except Exception:
+                ctx["log_allow"] = ctx.get("log_allow", "")
+            # propagate seed if provided
+            try:
+                ctx["seed"] = int(request.config.getoption("--seed") or 0)
+            except Exception:
+                ctx["seed"] = 0
+            sampler=None
+            if sink_url:
+                interval=int(opts.get("monitor_interval_s", 5)) if isinstance(opts, dict) else 5
+                prom_allow = opts.get("prom_allow_prefixes") if isinstance(opts, dict) else None
+                sampler=MetricsSampler(nodes, run_meta_eff, scenario.get("id",""), topo, sink_url=sink_url, interval_s=interval, stage_prefix="run", run_id=run_id, prom_allow_prefixes=prom_allow, ctx=ctx)
+                sampler.start()
+            for step in scenario.get("pre", []): _apply_step(step, nodes, leader, ctx)
+            kb=None
+            if faults_mode != "random" and "workload" in scenario:
+                wl=scenario["workload"]
+                secure = False
+                kb=KeeperBench(
+                    nodes[0],
+                    servers_arg(nodes),
+                    cfg_path=str(WORKDIR/wl["config"]) if wl.get("config") else None,
+                    duration_s=wl.get("duration", request.config.getoption("--duration")),
+                    replay_path=wl.get("replay"),
+                    secure=secure,
+                )
+                ctx["workload"]=wl; ctx["bench_node"]=nodes[0]; ctx["bench_secure"]=secure; ctx["bench_servers"]=servers_arg(nodes)
+            for action in fs_effective: _apply_step(action, nodes, leader, ctx)
+            if kb:
+                summary = kb.run()
+            elif ctx.get("bench_summary"):
+                summary = ctx.get("bench_summary") or {}
+            for gate in scenario.get("gates", []): _apply_gate(gate, nodes, leader, ctx, summary)
+            if sink_url:
+                run_row={
+                    "run_id": run_id,
+                    "commit_sha": run_meta_eff.get("commit_sha","local"),
+                    "backend": backend,
+                    "scenario": scenario.get("id",""),
+                    "topology": topo,
+                    "summary_json": json.dumps(summary),
+                }
+                sink_clickhouse(sink_url, "keeper_bench_runs", [run_row])
+            _snapshot_and_sink(nodes, "post", scenario.get("id",""), topo, run_meta_eff, sink_url, run_id)
+            try:
+                from ci.praktika.cidb import CIDB
+                from ci.praktika.settings import Settings
+                from ci.praktika.info import Info
+                info = Info()
+                url_secret = info.get_secret(Settings.SECRET_CI_DB_URL)
+                user_secret = info.get_secret(Settings.SECRET_CI_DB_USER)
+                passwd_secret = info.get_secret(Settings.SECRET_CI_DB_PASSWORD)
+                url_w = user_w = pwd_w = None
+                if url_secret and user_secret and passwd_secret:
+                    url_w, user_w, pwd_w = url_secret.join_with(user_secret).join_with(passwd_secret).get_value()
+                else:
+                    try:
+                        url_w = os.environ.get("KEEPER_CIDB_URL", "").strip()
+                        user_w = os.environ.get("KEEPER_CIDB_USER", "").strip()
+                        pwd_w = os.environ.get("KEEPER_CIDB_PASSWORD", "").strip()
+                    except Exception:
+                        url_w = user_w = pwd_w = None
+                if url_w and user_w and pwd_w:
+                    if getattr(Settings, "KEEPER_CI_DB_DB_NAME", ""):
+                        Settings.CI_DB_DB_NAME = Settings.KEEPER_CI_DB_DB_NAME
+                    if getattr(Settings, "KEEPER_CI_DB_TABLE_NAME", ""):
+                        Settings.CI_DB_TABLE_NAME = Settings.KEEPER_CI_DB_TABLE_NAME
+                    if not Settings.CI_DB_TABLE_NAME:
+                        Settings.CI_DB_TABLE_NAME = "checks"
+                    job_name = os.environ.get("JOB_NAME", "keeper-stress").strip() or "keeper-stress"
+                    prn = 0
+                    try:
+                        prn = int(os.environ.get("PR_NUMBER", "0") or 0)
+                    except Exception:
+                        prn = 0
+                    status = "success"
+                    tdur_ms = int(max(0, (time.time() - start_ts)) * 1000)
+                    ts_str = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(start_ts))
+                    row = {
+                        "pull_request_number": prn,
+                        "commit_sha": run_meta_eff.get("commit_sha", "local"),
+                        "commit_url": "",
+                        "check_name": job_name,
+                        "check_status": status,
+                        "check_duration_ms": tdur_ms,
+                        "check_start_time": ts_str,
+                        "report_url": "",
+                        "pull_request_url": "",
+                        "base_ref": "",
+                        "base_repo": "",
+                        "head_ref": "",
+                        "head_repo": "",
+                        "task_url": "",
+                        "instance_type": "",
+                        "instance_id": "",
+                        "test_name": scenario.get("id", ""),
+                        "test_status": "OK",
+                        "test_duration_ms": tdur_ms,
+                        "test_context_raw": json.dumps(summary),
+                    }
+                    CIDB(url=url_w, user=user_w, passwd=pwd_w).insert_rows([json.dumps(row)])
+            except Exception:
+                pass
+        except Exception:
+            # Emit minimal reproducible scenario to a file for debugging
+            try:
+                repro_path = f"/tmp/keeper_repro_{run_id}.yaml"
+                with open(repro_path, "w", encoding="utf-8") as f:
+                    yaml.safe_dump(scenario, f, sort_keys=False)
+                print(f"[keeper] reproducible scenario written: {repro_path}")
+            except Exception:
+                pass
+            # Attempt to snapshot fail state as well
+            try:
+                sink_url=request.config.getoption("--sink-url")
+                _snapshot_and_sink(nodes, "fail", scenario.get("id",""), topo, run_meta_eff, sink_url, run_id)
+            except Exception:
+                pass
+            try:
+                from ci.praktika.cidb import CIDB
+                from ci.praktika.settings import Settings
+                from ci.praktika.info import Info
+                info = Info()
+&gt;               url_secret = info.get_secret(Settings.SECRET_CI_DB_URL)
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/stress/keeper/tests/test_scenarios.py:370: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+ci/praktika/info.py:142: in get_secret
+    return self.workflow.get_secret(name)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/tests/test_scenarios.py:274: in test_scenario
+    for action in fs_effective: _apply_step(action, nodes, leader, ctx)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/tests/test_scenarios.py:19: in _apply_step
+    apply_step_dispatcher(step, nodes, leader, ctx)
+tests/stress/keeper/framework/faults.py:174: in apply_step
+    return fault_registry[kind](ctx, nodes, leader, step)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/faults.py:306: in _f_ps_during
+    return impl(ctx, nodes, leader, step)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/faults_network.py:411: in _f_ps_during
+    apply_step(sub, nodes, leader, ctx)
+tests/stress/keeper/framework/faults.py:174: in apply_step
+    return fault_registry[kind](ctx, nodes, leader, step)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/faults.py:331: in _f_reconfig
+    cli = _get_cli(cluster, node, ctx)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/faults.py:38: in _get_cli
+    cli = ku.KeeperClient(cluster.server_bin_path, cluster.get_instance_ip(name), CLIENT_PORT)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/integration/helpers/keeper_utils.py:123: in __init__
+    self.get("/keeper", 60.0)
+tests/integration/helpers/keeper_utils.py:183: in get
+    return self.execute_query(f"get '{path}'", timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;helpers.keeper_utils.KeeperClient object at 0xfa1d370af8c0&gt;
+query = "get '/keeper'", timeout = 60.0
+
+    def execute_query(self, query: str, timeout: float = 60.0) -&gt; str:
+        output = io.BytesIO()
+    
+        self.proc.stdin.write(query.encode() + b"\n")
+        self.proc.stdin.flush()
+    
+        events = self.poller.poll(timeout)
+        if not events:
+            raise TimeoutError(f"Keeper client returned no output")
+    
+        for fd_num, event in events:
+            if event &amp; (select.EPOLLIN | select.EPOLLPRI):
+                file = self._fd_nums[fd_num]
+    
+                if file == self.proc.stdout:
+                    while True:
+                        chunk = file.readline()
+                        if chunk.endswith(self.SEPARATOR):
+                            break
+    
+                        output.write(chunk)
+    
+                elif file == self.proc.stderr:
+                    self.proc.stdout.readline()
+&gt;                   raise KeeperException(self.proc.stderr.readline().strip().decode())
+E                   helpers.keeper_utils.KeeperException: Coordination::Exception: All connection tries failed while connecting to ZooKeeper. nodes: 172.22.0.4:9181
+
+tests/integration/helpers/keeper_utils.py:165: KeeperException</failure></testcase><testcase classname="tests.stress.keeper.tests.test_scenarios" name="test_scenario[WEEKLY-RCFG-PART-NEG[rocksdb|t3]]" time="57.926"><failure message="helpers.keeper_utils.KeeperException: Coordination::Exception: All connection tries failed while connecting to ZooKeeper. nodes: 172.22.0.4:9181">scenario = {'backend': 'rocksdb', 'faults': [{'kind': 'partition_symmetric_during', 'on': 'leader', 'steps': [{'kind': 'reconfig'...o': 0.05, 'type': 'error_rate_le'}, {'max_ms': 5000, 'type': 'p99_le'}], 'id': 'WEEKLY-RCFG-PART-NEG[rocksdb|t3]', ...}
+cluster_factory = &lt;function cluster_factory.&lt;locals&gt;._make at 0xfa1d397e4540&gt;
+request = &lt;FixtureRequest for &lt;Function test_scenario[WEEKLY-RCFG-PART-NEG[rocksdb|t3]]&gt;&gt;
+run_meta = {'backend': 'default', 'commit_sha': 'local'}
+
+    @pytest.mark.timeout(2400)
+    def test_scenario(scenario, cluster_factory, request, run_meta):
+        start_ts = time.time()
+        topo=scenario.get("topology",3)
+        flags=scenario.get("keeper_flags_xml","")
+        backend = scenario.get("backend") or request.config.getoption("--keeper-backend")
+        # Effective run_meta per test with the scenario-selected backend
+        run_meta_eff = dict(run_meta or {})
+        try:
+            run_meta_eff["backend"] = backend
+        except Exception:
+            pass
+        opts=scenario.get("opts", {})
+        try:
+            faults_mode = request.config.getoption("--faults")
+        except Exception:
+            faults_mode = os.environ.get("KEEPER_FAULTS", "on")
+        try:
+            rnd_count = int(request.config.getoption("--random-faults-count") or 1)
+        except Exception:
+            rnd_count = int(os.environ.get("KEEPER_RANDOM_FAULTS_COUNT", "1"))
+        try:
+            seed_val = int(request.config.getoption("--seed") or 0)
+        except Exception:
+            seed_val = 0
+        fs_original = scenario.get("faults", []) or []
+        fs_effective = fs_original
+        if faults_mode == "off":
+            fs_effective = []
+        elif faults_mode == "random":
+            try:
+                dur_default = int((scenario.get("workload") or {}).get("duration") or request.config.getoption("--duration"))
+            except Exception:
+                dur_default = int(os.environ.get("KEEPER_DURATION", "120"))
+            if seed_val &lt;= 0:
+                import os as _os
+                seed_val = int.from_bytes(_os.urandom(4), 'big')
+            try:
+                try:
+                    inc_raw = request.config.getoption("--random-faults-include") or os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                except Exception:
+                    inc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                try:
+                    exc_raw = request.config.getoption("--random-faults-exclude") or os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                except Exception:
+                    exc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                inc = set([x.strip() for x in (inc_raw or "").split(",") if x.strip()])
+                exc = set([x.strip() for x in (exc_raw or "").split(",") if x.strip()])
+                cands = [k for k in list(getattr(fault_registry, 'keys', lambda: [])()) if k not in _FUZZ_EXCLUDE]
+                if not cands and isinstance(fault_registry, dict):
+                    cands = [k for k in fault_registry.keys() if k not in _FUZZ_EXCLUDE]
+                weights = {}
+                if inc:
+                    for k in cands:
+                        weights[k] = 1 if k in inc else 0
+                else:
+                    for k in cands:
+                        weights[k] = 0 if k in exc else 1
+                fz = generate_fuzz_scenario(seed_val, max(1, rnd_count), dur_default, weights=weights)
+                rnd_faults = fz.get("faults", []) or []
+                rb = {"kind": "run_bench", "duration_s": dur_default}
+                fs_effective = [{"kind": "parallel", "steps": [rb] + rnd_faults}]
+            except Exception:
+                fs_effective = fs_original
+        try:
+            uses_dm = any((f.get("kind") in ("dm_delay","dm_error")) for f in fs_effective)
+            if uses_dm:
+                os.environ.setdefault("KEEPER_PRIVILEGED", "1")
+                os.environ.setdefault("KEEPER_HOST_AUTO_PROVISION", "1")
+            # Relax log gate for known transient errors during chaos if not provided by env
+            os.environ.setdefault(
+                "KEEPER_LOG_ALLOW",
+                "failed to read rpc header.*End of file|DNS error|Not found address of host|Net Exception: Socket is not connected|CANNOT_READ_ALL_DATA|Cannot read all data|Unknown table.*system\\.trace_log|Unknown table expression identifier 'system\\.trace_log'"
+            )
+        except Exception:
+            pass
+        # compute run_id early for reproducible artifact paths
+        run_id=f"{scenario.get('id','')}-{run_meta.get('commit_sha','local')}-{uuid.uuid4().hex[:8]}"
+        # Use a unique cluster name per test to avoid instance-dir collisions
+        try:
+            cname = run_id.replace('/', '_').replace(' ', '_')
+            os.environ["KEEPER_CLUSTER_NAME"] = cname
+        except Exception:
+            pass
+        cluster, nodes = cluster_factory(topo, backend, opts)
+        summary={}; ctx={}
+        try:
+            try:
+                scenario_for_env = copy.deepcopy(scenario)
+                scenario_for_env["faults"] = fs_effective
+            except Exception:
+                scenario_for_env = scenario
+            ensure_environment(nodes, scenario_for_env)
+            single_leader(nodes)
+            leader=[n for n in nodes if is_leader(n)][0]
+            sink_url=request.config.getoption("--sink-url")
+            _snapshot_and_sink(nodes, "pre", scenario.get("id",""), topo, run_meta_eff, sink_url, run_id)
+            ctx["cluster"] = cluster
+            try:
+                ctx["faults_mode"] = request.config.getoption("--faults")
+            except Exception:
+                ctx["faults_mode"] = ctx.get("faults_mode", "on")
+            try:
+                ctx["log_allow"] = request.config.getoption("--log-allow") or ""
+            except Exception:
+                ctx["log_allow"] = ctx.get("log_allow", "")
+            # propagate seed if provided
+            try:
+                ctx["seed"] = int(request.config.getoption("--seed") or 0)
+            except Exception:
+                ctx["seed"] = 0
+            sampler=None
+            if sink_url:
+                interval=int(opts.get("monitor_interval_s", 5)) if isinstance(opts, dict) else 5
+                prom_allow = opts.get("prom_allow_prefixes") if isinstance(opts, dict) else None
+                sampler=MetricsSampler(nodes, run_meta_eff, scenario.get("id",""), topo, sink_url=sink_url, interval_s=interval, stage_prefix="run", run_id=run_id, prom_allow_prefixes=prom_allow, ctx=ctx)
+                sampler.start()
+            for step in scenario.get("pre", []): _apply_step(step, nodes, leader, ctx)
+            kb=None
+            if faults_mode != "random" and "workload" in scenario:
+                wl=scenario["workload"]
+                secure = False
+                kb=KeeperBench(
+                    nodes[0],
+                    servers_arg(nodes),
+                    cfg_path=str(WORKDIR/wl["config"]) if wl.get("config") else None,
+                    duration_s=wl.get("duration", request.config.getoption("--duration")),
+                    replay_path=wl.get("replay"),
+                    secure=secure,
+                )
+                ctx["workload"]=wl; ctx["bench_node"]=nodes[0]; ctx["bench_secure"]=secure; ctx["bench_servers"]=servers_arg(nodes)
+            for action in fs_effective: _apply_step(action, nodes, leader, ctx)
+            if kb:
+                summary = kb.run()
+            elif ctx.get("bench_summary"):
+                summary = ctx.get("bench_summary") or {}
+            for gate in scenario.get("gates", []): _apply_gate(gate, nodes, leader, ctx, summary)
+            if sink_url:
+                run_row={
+                    "run_id": run_id,
+                    "commit_sha": run_meta_eff.get("commit_sha","local"),
+                    "backend": backend,
+                    "scenario": scenario.get("id",""),
+                    "topology": topo,
+                    "summary_json": json.dumps(summary),
+                }
+                sink_clickhouse(sink_url, "keeper_bench_runs", [run_row])
+            _snapshot_and_sink(nodes, "post", scenario.get("id",""), topo, run_meta_eff, sink_url, run_id)
+            try:
+                from ci.praktika.cidb import CIDB
+                from ci.praktika.settings import Settings
+                from ci.praktika.info import Info
+                info = Info()
+                url_secret = info.get_secret(Settings.SECRET_CI_DB_URL)
+                user_secret = info.get_secret(Settings.SECRET_CI_DB_USER)
+                passwd_secret = info.get_secret(Settings.SECRET_CI_DB_PASSWORD)
+                url_w = user_w = pwd_w = None
+                if url_secret and user_secret and passwd_secret:
+                    url_w, user_w, pwd_w = url_secret.join_with(user_secret).join_with(passwd_secret).get_value()
+                else:
+                    try:
+                        url_w = os.environ.get("KEEPER_CIDB_URL", "").strip()
+                        user_w = os.environ.get("KEEPER_CIDB_USER", "").strip()
+                        pwd_w = os.environ.get("KEEPER_CIDB_PASSWORD", "").strip()
+                    except Exception:
+                        url_w = user_w = pwd_w = None
+                if url_w and user_w and pwd_w:
+                    if getattr(Settings, "KEEPER_CI_DB_DB_NAME", ""):
+                        Settings.CI_DB_DB_NAME = Settings.KEEPER_CI_DB_DB_NAME
+                    if getattr(Settings, "KEEPER_CI_DB_TABLE_NAME", ""):
+                        Settings.CI_DB_TABLE_NAME = Settings.KEEPER_CI_DB_TABLE_NAME
+                    if not Settings.CI_DB_TABLE_NAME:
+                        Settings.CI_DB_TABLE_NAME = "checks"
+                    job_name = os.environ.get("JOB_NAME", "keeper-stress").strip() or "keeper-stress"
+                    prn = 0
+                    try:
+                        prn = int(os.environ.get("PR_NUMBER", "0") or 0)
+                    except Exception:
+                        prn = 0
+                    status = "success"
+                    tdur_ms = int(max(0, (time.time() - start_ts)) * 1000)
+                    ts_str = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(start_ts))
+                    row = {
+                        "pull_request_number": prn,
+                        "commit_sha": run_meta_eff.get("commit_sha", "local"),
+                        "commit_url": "",
+                        "check_name": job_name,
+                        "check_status": status,
+                        "check_duration_ms": tdur_ms,
+                        "check_start_time": ts_str,
+                        "report_url": "",
+                        "pull_request_url": "",
+                        "base_ref": "",
+                        "base_repo": "",
+                        "head_ref": "",
+                        "head_repo": "",
+                        "task_url": "",
+                        "instance_type": "",
+                        "instance_id": "",
+                        "test_name": scenario.get("id", ""),
+                        "test_status": "OK",
+                        "test_duration_ms": tdur_ms,
+                        "test_context_raw": json.dumps(summary),
+                    }
+                    CIDB(url=url_w, user=user_w, passwd=pwd_w).insert_rows([json.dumps(row)])
+            except Exception:
+                pass
+        except Exception:
+            # Emit minimal reproducible scenario to a file for debugging
+            try:
+                repro_path = f"/tmp/keeper_repro_{run_id}.yaml"
+                with open(repro_path, "w", encoding="utf-8") as f:
+                    yaml.safe_dump(scenario, f, sort_keys=False)
+                print(f"[keeper] reproducible scenario written: {repro_path}")
+            except Exception:
+                pass
+            # Attempt to snapshot fail state as well
+            try:
+                sink_url=request.config.getoption("--sink-url")
+                _snapshot_and_sink(nodes, "fail", scenario.get("id",""), topo, run_meta_eff, sink_url, run_id)
+            except Exception:
+                pass
+            try:
+                from ci.praktika.cidb import CIDB
+                from ci.praktika.settings import Settings
+                from ci.praktika.info import Info
+                info = Info()
+&gt;               url_secret = info.get_secret(Settings.SECRET_CI_DB_URL)
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/stress/keeper/tests/test_scenarios.py:370: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+ci/praktika/info.py:142: in get_secret
+    return self.workflow.get_secret(name)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/tests/test_scenarios.py:274: in test_scenario
+    for action in fs_effective: _apply_step(action, nodes, leader, ctx)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/tests/test_scenarios.py:19: in _apply_step
+    apply_step_dispatcher(step, nodes, leader, ctx)
+tests/stress/keeper/framework/faults.py:174: in apply_step
+    return fault_registry[kind](ctx, nodes, leader, step)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/faults.py:306: in _f_ps_during
+    return impl(ctx, nodes, leader, step)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/faults_network.py:411: in _f_ps_during
+    apply_step(sub, nodes, leader, ctx)
+tests/stress/keeper/framework/faults.py:174: in apply_step
+    return fault_registry[kind](ctx, nodes, leader, step)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/faults.py:331: in _f_reconfig
+    cli = _get_cli(cluster, node, ctx)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/faults.py:38: in _get_cli
+    cli = ku.KeeperClient(cluster.server_bin_path, cluster.get_instance_ip(name), CLIENT_PORT)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/integration/helpers/keeper_utils.py:123: in __init__
+    self.get("/keeper", 60.0)
+tests/integration/helpers/keeper_utils.py:183: in get
+    return self.execute_query(f"get '{path}'", timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;helpers.keeper_utils.KeeperClient object at 0xfa1d372c0080&gt;
+query = "get '/keeper'", timeout = 60.0
+
+    def execute_query(self, query: str, timeout: float = 60.0) -&gt; str:
+        output = io.BytesIO()
+    
+        self.proc.stdin.write(query.encode() + b"\n")
+        self.proc.stdin.flush()
+    
+        events = self.poller.poll(timeout)
+        if not events:
+            raise TimeoutError(f"Keeper client returned no output")
+    
+        for fd_num, event in events:
+            if event &amp; (select.EPOLLIN | select.EPOLLPRI):
+                file = self._fd_nums[fd_num]
+    
+                if file == self.proc.stdout:
+                    while True:
+                        chunk = file.readline()
+                        if chunk.endswith(self.SEPARATOR):
+                            break
+    
+                        output.write(chunk)
+    
+                elif file == self.proc.stderr:
+                    self.proc.stdout.readline()
+&gt;                   raise KeeperException(self.proc.stderr.readline().strip().decode())
+E                   helpers.keeper_utils.KeeperException: Coordination::Exception: All connection tries failed while connecting to ZooKeeper. nodes: 172.22.0.4:9181
+
+tests/integration/helpers/keeper_utils.py:165: KeeperException</failure></testcase></testsuite></testsuites>

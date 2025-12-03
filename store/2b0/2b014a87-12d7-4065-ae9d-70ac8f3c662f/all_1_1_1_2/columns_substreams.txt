@@ -1,0 +1,8 @@
+columns substreams version: 1
+3 columns:
+1 substreams for column `k`:
+	k
+1 substreams for column `v`:
+	v
+1 substreams for column `_block_number`:
+	_block_number

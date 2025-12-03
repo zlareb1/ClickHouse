@@ -1,0 +1,10 @@
+columns substreams version: 1
+4 columns:
+1 substreams for column `l_partkey`:
+	l_partkey
+1 substreams for column `l_extendedprice`:
+	l_extendedprice
+1 substreams for column `l_discount`:
+	l_discount
+1 substreams for column `l_shipdate`:
+	l_shipdate

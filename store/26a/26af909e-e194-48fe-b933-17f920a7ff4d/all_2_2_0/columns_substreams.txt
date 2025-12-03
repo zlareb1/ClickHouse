@@ -1,0 +1,16 @@
+columns substreams version: 1
+7 columns:
+1 substreams for column `timestamp`:
+	timestamp
+1 substreams for column `SrcIp`:
+	SrcIp
+1 substreams for column `SrcPort`:
+	SrcPort
+1 substreams for column `DestIp`:
+	DestIp
+1 substreams for column `DestPort`:
+	DestPort
+1 substreams for column `SegmentValue`:
+	SegmentValue
+1 substreams for column `FlowDirection`:
+	FlowDirection

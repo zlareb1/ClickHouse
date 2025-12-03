@@ -46,6 +46,8 @@ CI_DB_TABLE_NAME = "checks"
 SECRET_CI_DB_URL = "clickhouse-test-stat-url"
 SECRET_CI_DB_USER = "clickhouse-test-stat-login"
 SECRET_CI_DB_PASSWORD = "clickhouse-test-stat-password"
+KEEPER_CI_DB_DB_NAME = "keeper_stress_tests"
+KEEPER_CI_DB_TABLE_NAME = "checks"
 
 USE_CUSTOM_GH_AUTH = True
 SECRET_GH_APP_ID: str = "woolenwolf_gh_app.clickhouse-app-id"

@@ -1,0 +1,31 @@
+columns substreams version: 1
+10 columns:
+3 substreams for column `hostname`:
+	hostname.dict_prefix
+	hostname.dict
+	hostname
+1 substreams for column `trace_id`:
+	trace_id
+1 substreams for column `span_id`:
+	span_id
+1 substreams for column `parent_span_id`:
+	parent_span_id
+3 substreams for column `operation_name`:
+	operation_name.dict_prefix
+	operation_name.dict
+	operation_name
+2 substreams for column `kind`:
+	kind.sparse.idx
+	kind
+1 substreams for column `start_time_us`:
+	start_time_us
+1 substreams for column `finish_time_us`:
+	finish_time_us
+1 substreams for column `finish_date`:
+	finish_date
+5 substreams for column `attribute`:
+	attribute%2Ekeys.dict_prefix
+	attribute.size0
+	attribute%2Ekeys.dict
+	attribute%2Ekeys
+	attribute%2Evalues

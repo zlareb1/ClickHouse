@@ -1,0 +1,6 @@
+columns format version: 1
+4 columns:
+`k` UInt32
+`val` Float64
+`cat` String
+`r` UInt32

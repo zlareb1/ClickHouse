@@ -1,8 +1,8 @@
 from contextlib import contextmanager
 import os
-from .util import sh, sh_root, resolve_targets
-from .settings import DEFAULT_FAULT_DURATION_S
-from .registry import register_fault
+from ..framework.core.util import sh, sh_root, resolve_targets
+from ..framework.core.settings import DEFAULT_FAULT_DURATION_S
+from ..framework.core.registry import register_fault
 
 STRICT_FAULTS = os.environ.get("KEEPER_STRICT_FAULTS", "1").strip().lower() not in ("0","false","no","off")
 

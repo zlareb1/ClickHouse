@@ -1,0 +1,21 @@
+columns substreams version: 1
+2 columns:
+16 substreams for column `d`:
+	d.dynamic_structure
+	d.variant_discr
+	d.Float32
+	d.Int128
+	d.Int16
+	d.Int256
+	d.Int32
+	d.Int64
+	d.Int8
+	d.SharedVariant
+	d.UInt128
+	d.UInt16
+	d.UInt256
+	d.UInt32
+	d.UInt64
+	d.UInt8
+1 substreams for column `_block_number`:
+	_block_number

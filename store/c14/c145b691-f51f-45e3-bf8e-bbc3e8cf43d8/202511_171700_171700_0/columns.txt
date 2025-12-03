@@ -1,0 +1,35 @@
+columns format version: 1
+33 columns:
+`hostname` LowCardinality(String)
+`type` Enum8('Request' = 1, 'Response' = 2, 'Finalize' = 3)
+`event_date` Date
+`event_time` DateTime64(6)
+`thread_id` UInt64
+`query_id` String
+`address` IPv6
+`port` UInt16
+`session_id` Int64
+`duration_microseconds` UInt64
+`xid` Int64
+`has_watch` UInt8
+`op_num` Enum16('Close' = -11, 'Error' = -1, 'Watch' = 0, 'Create' = 1, 'Remove' = 2, 'Exists' = 3, 'Get' = 4, 'Set' = 5, 'GetACL' = 6, 'SetACL' = 7, 'SimpleList' = 8, 'Sync' = 9, 'Heartbeat' = 11, 'List' = 12, 'Check' = 13, 'Multi' = 14, 'Reconfig' = 16, 'MultiRead' = 22, 'Auth' = 100, 'FilteredList' = 500, 'CheckNotExists' = 501, 'CreateIfNotExists' = 502, 'RemoveRecursive' = 503, 'CheckStat' = 504, 'SessionID' = 997)
+`path` String
+`data` String
+`is_ephemeral` UInt8
+`is_sequential` UInt8
+`version` Nullable(Int32)
+`requests_size` UInt32
+`request_idx` UInt32
+`zxid` Int64
+`error` Nullable(Enum8('ZNOTREADONLY' = -119, 'ZSESSIONMOVED' = -118, 'ZNOTHING' = -117, 'ZCLOSING' = -116, 'ZAUTHFAILED' = -115, 'ZINVALIDACL' = -114, 'ZINVALIDCALLBACK' = -113, 'ZSESSIONEXPIRED' = -112, 'ZNOTEMPTY' = -111, 'ZNODEEXISTS' = -110, 'ZNOCHILDRENFOREPHEMERALS' = -108, 'ZBADVERSION' = -103, 'ZNOAUTH' = -102, 'ZNONODE' = -101, 'ZAPIERROR' = -100, 'ZINVALIDSTATE' = -9, 'ZBADARGUMENTS' = -8, 'ZOPERATIONTIMEOUT' = -7, 'ZUNIMPLEMENTED' = -6, 'ZMARSHALLINGERROR' = -5, 'ZCONNECTIONLOSS' = -4, 'ZDATAINCONSISTENCY' = -3, 'ZRUNTIMEINCONSISTENCY' = -2, 'ZSYSTEMERROR' = -1, 'ZOK' = 0))
+`watch_type` Nullable(Enum8('NOTWATCHING' = -2, 'SESSION' = -1, 'CREATED' = 1, 'DELETED' = 2, 'CHANGED' = 3, 'CHILD' = 4))
+`watch_state` Nullable(Enum16('AUTH_FAILED' = -113, 'EXPIRED_SESSION' = -112, 'CONNECTING' = 1, 'ASSOCIATING' = 2, 'CONNECTED' = 3, 'READONLY' = 5, 'NOTCONNECTED' = 999))
+`path_created` String
+`stat_czxid` Int64
+`stat_mzxid` Int64
+`stat_pzxid` Int64
+`stat_version` Int32
+`stat_cversion` Int32
+`stat_dataLength` Int32
+`stat_numChildren` Int32
+`children` Array(String)

@@ -1,0 +1,138 @@
+columns substreams version: 1
+49 columns:
+3 substreams for column `hostname`:
+	hostname.dict_prefix
+	hostname.dict
+	hostname
+1 substreams for column `event_date`:
+	event_date
+1 substreams for column `event_time`:
+	event_time
+1 substreams for column `event_time_microseconds`:
+	event_time_microseconds
+1 substreams for column `query_start_time`:
+	query_start_time
+1 substreams for column `query_start_time_microseconds`:
+	query_start_time_microseconds
+1 substreams for column `query_duration_ms`:
+	query_duration_ms
+2 substreams for column `read_rows`:
+	read_rows.sparse.idx
+	read_rows
+2 substreams for column `read_bytes`:
+	read_bytes.sparse.idx
+	read_bytes
+2 substreams for column `written_rows`:
+	written_rows.sparse.idx
+	written_rows
+2 substreams for column `written_bytes`:
+	written_bytes.sparse.idx
+	written_bytes
+1 substreams for column `memory_usage`:
+	memory_usage
+1 substreams for column `peak_memory_usage`:
+	peak_memory_usage
+3 substreams for column `thread_name`:
+	thread_name.dict_prefix
+	thread_name.dict
+	thread_name
+1 substreams for column `thread_id`:
+	thread_id
+1 substreams for column `master_thread_id`:
+	master_thread_id
+3 substreams for column `current_database`:
+	current_database.dict_prefix
+	current_database.dict
+	current_database
+2 substreams for column `query`:
+	query.size
+	query
+1 substreams for column `normalized_query_hash`:
+	normalized_query_hash
+1 substreams for column `is_initial_query`:
+	is_initial_query
+3 substreams for column `user`:
+	user.dict_prefix
+	user.dict
+	user
+2 substreams for column `query_id`:
+	query_id.size
+	query_id
+1 substreams for column `address`:
+	address
+1 substreams for column `port`:
+	port
+3 substreams for column `initial_user`:
+	initial_user.dict_prefix
+	initial_user.dict
+	initial_user
+2 substreams for column `initial_query_id`:
+	initial_query_id.size
+	initial_query_id
+1 substreams for column `initial_address`:
+	initial_address
+1 substreams for column `initial_port`:
+	initial_port
+1 substreams for column `initial_query_start_time`:
+	initial_query_start_time
+1 substreams for column `initial_query_start_time_microseconds`:
+	initial_query_start_time_microseconds
+1 substreams for column `interface`:
+	interface
+2 substreams for column `is_secure`:
+	is_secure.sparse.idx
+	is_secure
+3 substreams for column `os_user`:
+	os_user.dict_prefix
+	os_user.dict
+	os_user
+3 substreams for column `client_hostname`:
+	client_hostname.dict_prefix
+	client_hostname.dict
+	client_hostname
+3 substreams for column `client_name`:
+	client_name.dict_prefix
+	client_name.dict
+	client_name
+1 substreams for column `client_revision`:
+	client_revision
+1 substreams for column `client_version_major`:
+	client_version_major
+1 substreams for column `client_version_minor`:
+	client_version_minor
+1 substreams for column `client_version_patch`:
+	client_version_patch
+1 substreams for column `script_query_number`:
+	script_query_number
+1 substreams for column `script_line_number`:
+	script_line_number
+2 substreams for column `http_method`:
+	http_method.sparse.idx
+	http_method
+3 substreams for column `http_user_agent`:
+	http_user_agent.dict_prefix
+	http_user_agent.dict
+	http_user_agent
+3 substreams for column `http_referer`:
+	http_referer.sparse.idx
+	http_referer.size
+	http_referer
+3 substreams for column `forwarded_for`:
+	forwarded_for.sparse.idx
+	forwarded_for.size
+	forwarded_for
+3 substreams for column `quota_key`:
+	quota_key.sparse.idx
+	quota_key.size
+	quota_key
+2 substreams for column `distributed_depth`:
+	distributed_depth.sparse.idx
+	distributed_depth
+1 substreams for column `revision`:
+	revision
+5 substreams for column `ProfileEvents`:
+	ProfileEvents%2Ekeys.dict_prefix
+	ProfileEvents.size0
+	ProfileEvents%2Ekeys.dict
+	ProfileEvents%2Ekeys
+	ProfileEvents%2Evalues

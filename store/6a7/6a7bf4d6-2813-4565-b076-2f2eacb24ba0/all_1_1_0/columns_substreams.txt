@@ -1,0 +1,30 @@
+columns substreams version: 1
+12 columns:
+3 substreams for column `hostname`:
+	hostname.dict_prefix
+	hostname.dict
+	hostname
+1 substreams for column `event_date`:
+	event_date
+1 substreams for column `event_time`:
+	event_time
+1 substreams for column `timestamp_ns`:
+	timestamp_ns
+1 substreams for column `signal`:
+	signal
+1 substreams for column `thread_id`:
+	thread_id
+1 substreams for column `query_id`:
+	query_id
+2 substreams for column `trace`:
+	trace.size0
+	trace
+2 substreams for column `trace_full`:
+	trace_full.size0
+	trace_full
+1 substreams for column `version`:
+	version
+1 substreams for column `revision`:
+	revision
+1 substreams for column `build_id`:
+	build_id

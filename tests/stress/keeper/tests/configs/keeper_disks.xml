@@ -1,0 +1,2 @@
+<clickhouse><storage_configuration><disks><local_log_disk><type>local</type><path>/var/lib/clickhouse/coordination/log/</path></local_log_disk>
+<local_snapshot_disk><type>local</type><path>/var/lib/clickhouse/coordination/snapshots/</path></local_snapshot_disk></disks></storage_configuration></clickhouse>

@@ -1,0 +1,5 @@
+columns format version: 1
+3 columns:
+`d` Date
+`k` UInt32
+`s` LowCardinality(String)

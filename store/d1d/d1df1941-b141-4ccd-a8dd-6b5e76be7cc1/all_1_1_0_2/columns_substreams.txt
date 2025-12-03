@@ -1,0 +1,10 @@
+columns substreams version: 1
+3 columns:
+1 substreams for column `d`:
+	d
+1 substreams for column `k`:
+	k
+3 substreams for column `s`:
+	s.dict_prefix
+	s.dict
+	s

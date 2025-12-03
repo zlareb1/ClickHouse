@@ -1,0 +1,380 @@
+<!-- This file was generated automatically.
+     Do not edit it: it is likely to be discarded and generated again before it's read next time.
+     Files used to generate this file:
+       /etc/clickhouse-server/users.xml
+       /etc/clickhouse-server/users.d/access_management.xml
+       /etc/clickhouse-server/users.d/allow_introspection_functions.yaml
+       /etc/clickhouse-server/users.d/allow_only_from_localhost.xml
+       /etc/clickhouse-server/users.d/ci_logs_sender.yaml
+       /etc/clickhouse-server/users.d/database_atomic_drop_detach_sync.xml
+       /etc/clickhouse-server/users.d/enable_blobs_check.xml
+       /etc/clickhouse-server/users.d/filelog.xml
+       /etc/clickhouse-server/users.d/insert_keeper_retries.xml
+       /etc/clickhouse-server/users.d/limits.yaml
+       /etc/clickhouse-server/users.d/log_queries.xml
+       /etc/clickhouse-server/users.d/marks.xml
+       /etc/clickhouse-server/users.d/memory_profiler.xml
+       /etc/clickhouse-server/users.d/no_fsync_metadata.xml
+       /etc/clickhouse-server/users.d/nonconst_timezone.xml
+       /etc/clickhouse-server/users.d/opentelemetry.xml
+       /etc/clickhouse-server/users.d/prefetch_settings.xml
+       /etc/clickhouse-server/users.d/readonly.xml
+       /etc/clickhouse-server/users.d/remote_queries.xml
+       /etc/clickhouse-server/users.d/replicated_ddl_entry.xml
+       /etc/clickhouse-server/users.d/session_log_test.xml
+       /etc/clickhouse-server/users.d/timeouts.xml      -->
+
+<clickhouse>
+    <!-- See also the files in users.d directory where the settings can be overridden. -->
+
+    <!-- Profiles of settings. -->
+    <profiles>
+        <!-- Default settings. -->
+        <default>
+            <!-- <async_insert>1</async_insert> -->
+        <allow_introspection_functions>1</allow_introspection_functions>
+            <database_atomic_wait_for_drop_and_detach_synchronously>1</database_atomic_wait_for_drop_and_detach_synchronously>
+        
+            <s3_check_objects_after_upload>1</s3_check_objects_after_upload>
+        
+            <stream_like_engine_allow_direct_select>1</stream_like_engine_allow_direct_select>
+        
+            <insert_keeper_max_retries>100</insert_keeper_max_retries>
+            <insert_keeper_fault_injection_probability>0.01</insert_keeper_fault_injection_probability>
+            <insert_keeper_retry_initial_backoff_ms>1</insert_keeper_retry_initial_backoff_ms>
+            <insert_keeper_retry_max_backoff_ms>10</insert_keeper_retry_max_backoff_ms>
+        <max_memory_usage>5G</max_memory_usage>
+            <max_rows_to_read>20000000</max_rows_to_read>
+            <s3_max_get_rps>1000000</s3_max_get_rps>
+            <s3_max_get_burst>2000000</s3_max_get_burst>
+            <s3_max_put_rps>1000000</s3_max_put_rps>
+            <s3_max_put_burst>2000000</s3_max_put_burst>
+            <max_remote_read_network_bandwidth>1T</max_remote_read_network_bandwidth>
+            <max_remote_write_network_bandwidth>1T</max_remote_write_network_bandwidth>
+            <max_local_read_bandwidth>1T</max_local_read_bandwidth>
+            <max_local_write_bandwidth>1T</max_local_write_bandwidth>
+            <use_index_for_in_with_subqueries_max_values>1G</use_index_for_in_with_subqueries_max_values>
+            <max_bytes_to_read>1T</max_bytes_to_read>
+            <max_bytes_to_read_leaf>1T</max_bytes_to_read_leaf>
+            <max_rows_to_group_by>10G</max_rows_to_group_by>
+            <max_rows_to_sort>10G</max_rows_to_sort>
+            <max_bytes_to_sort>10G</max_bytes_to_sort>
+            <max_result_rows>1G</max_result_rows>
+            <max_result_bytes>1G</max_result_bytes>
+            <max_execution_speed>100G</max_execution_speed>
+            <max_execution_speed_bytes>10T</max_execution_speed_bytes>
+            <timeout_before_checking_execution_speed>300</timeout_before_checking_execution_speed>
+            <max_estimated_execution_time>600</max_estimated_execution_time>
+            <max_columns_to_read>20K</max_columns_to_read>
+            <max_temporary_columns>20K</max_temporary_columns>
+            <max_temporary_non_const_columns>20K</max_temporary_non_const_columns>
+            <max_rows_in_set>10G</max_rows_in_set>
+            <max_bytes_in_set>10G</max_bytes_in_set>
+            <max_rows_in_join>10G</max_rows_in_join>
+            <max_bytes_in_join>10G</max_bytes_in_join>
+            <max_rows_to_transfer>1G</max_rows_to_transfer>
+            <max_bytes_to_transfer>1G</max_bytes_to_transfer>
+            <max_rows_in_distinct>10G</max_rows_in_distinct>
+            <max_bytes_in_distinct>10G</max_bytes_in_distinct>
+            <max_memory_usage_for_user>32G</max_memory_usage_for_user>
+            <max_network_bandwidth>100G</max_network_bandwidth>
+            <max_network_bytes>1T</max_network_bytes>
+            <max_network_bandwidth_for_user>100G</max_network_bandwidth_for_user>
+            <max_network_bandwidth_for_all_users>100G</max_network_bandwidth_for_all_users>
+            <max_temporary_data_on_disk_size_for_user>100G</max_temporary_data_on_disk_size_for_user>
+            <max_temporary_data_on_disk_size_for_query>100G</max_temporary_data_on_disk_size_for_query>
+            <max_backup_bandwidth>100G</max_backup_bandwidth>
+            <max_hyperscan_regexp_length>1M</max_hyperscan_regexp_length>
+            <max_hyperscan_regexp_total_length>10M</max_hyperscan_regexp_total_length>
+            <query_cache_max_size_in_bytes>10M</query_cache_max_size_in_bytes>
+            <query_cache_max_entries>100K</query_cache_max_entries>
+            <external_storage_max_read_rows>10G</external_storage_max_read_rows>
+            <external_storage_max_read_bytes>10G</external_storage_max_read_bytes>
+            <max_streams_for_merge_tree_reading>1000</max_streams_for_merge_tree_reading>
+            <lock_acquire_timeout>60</lock_acquire_timeout>
+            <log_queries>1</log_queries>
+        
+          <load_marks_asynchronously>1</load_marks_asynchronously>
+        
+            <max_untracked_memory>1Mi</max_untracked_memory>
+            <memory_profiler_step>1Mi</memory_profiler_step>
+        
+            <!-- Sometimes we see that pretty simple queries like
+                 CREATE DATABASE can take > 30 seconds.
+                 Let's try to disable fsync.
+             -->
+            <fsync_metadata>false</fsync_metadata>
+        
+            <allow_nonconst_timezone_arguments>1</allow_nonconst_timezone_arguments>
+        
+            <opentelemetry_start_trace_probability>0.1</opentelemetry_start_trace_probability>
+        
+            <allow_prefetched_read_pool_for_remote_filesystem>0</allow_prefetched_read_pool_for_remote_filesystem>
+            <allow_prefetched_read_pool_for_local_filesystem>0</allow_prefetched_read_pool_for_local_filesystem>
+            <filesystem_prefetch_max_memory_usage>1Gi</filesystem_prefetch_max_memory_usage>
+        
+            <!-- Avoid "Connection failed at try №1" messages. -->
+            <connect_timeout_with_failover_ms>2000</connect_timeout_with_failover_ms>
+            <connect_timeout_with_failover_secure_ms>3000</connect_timeout_with_failover_secure_ms>
+            <!-- Avoid this logic in tests to avoid EOF (10 hours is enough for tests)-->
+            <idle_connection_timeout>36000</idle_connection_timeout>
+            <!-- NOTE: instead of tunning idle_connection_timeout,
+                 SYSTEM RELOAD CONFIG can be executed before each test -->
+        
+            <distributed_ddl_entry_format_version>6</distributed_ddl_entry_format_version>
+        
+            <!-- Default HTTP timeout is 30 minutes. Set it to 1 minute. -->
+            <http_send_timeout>60</http_send_timeout>
+            <http_receive_timeout>60</http_receive_timeout>
+            <!-- 1 minute (default is 10 minutes) -->
+            <insert_quorum_timeout>60000</insert_quorum_timeout>
+            <!-- 30 seconds (default is 2 minutes) -->
+            <replication_wait_for_inactive_replica_timeout>30</replication_wait_for_inactive_replica_timeout>
+
+            <!-- Increase timeout for async INSERT to avoid flakiness in tests -->
+            <async_insert_busy_timeout_ms>5000</async_insert_busy_timeout_ms>
+        </default>
+
+        <!-- Profile that allows only read queries. -->
+        <readonly>
+            <readonly>1</readonly>
+        
+            
+        </readonly>
+    <ci_logs_sender>
+            <send_timeout>15</send_timeout>
+            <receive_timeout>15</receive_timeout>
+            <async_insert>0</async_insert>
+            <enable_filesystem_cache_on_write_operations>0</enable_filesystem_cache_on_write_operations>
+            <write_through_distributed_cache>0</write_through_distributed_cache>
+        </ci_logs_sender>
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        <!-- Profile that allows only read queries. -->
+        
+    
+        
+    
+        
+    
+        <session_log_test_xml_profile>
+            <!--
+            can't be readonly since we need to modify some
+            user settings in queries initiated by test.
+            <readonly>1</readonly>
+            -->
+            <send_logs_level>none</send_logs_level>
+        </session_log_test_xml_profile>
+    
+        
+    </profiles>
+
+    <!-- Users and ACL. -->
+    <users>
+        <!-- If user name was not specified, 'default' user is used. -->
+        <default>
+            <!-- See also the files in users.d directory where the password can be overridden.
+
+                 Password could be specified in plaintext or in SHA256 (in hex format).
+
+                 If you want to specify password in plaintext (not recommended), place it in 'password' element.
+                 Example: <password>qwerty</password>.
+                 Password could be empty.
+
+                 If you want to specify SHA256, place it in 'password_sha256_hex' element.
+                 Example: <password_sha256_hex>65e84be33532fb784c48129675f9eff3a682b27168c0ea744b2cf58ee02337c5</password_sha256_hex>
+                 Restrictions of SHA256: impossibility to connect to ClickHouse using MySQL JS client (as of July 2019).
+
+                 If you want to specify double SHA1, place it in 'password_double_sha1_hex' element.
+                 Example: <password_double_sha1_hex>e395796d6546b1b65db9d665cd43f0e858dd4303</password_double_sha1_hex>
+
+                 If you want to specify a previously defined LDAP server (see 'ldap_servers' in the main config) for authentication,
+                  place its name in 'server' element inside 'ldap' element.
+                 Example: <ldap><server>my_ldap_server</server></ldap>
+
+                 If you want to authenticate the user via Kerberos (assuming Kerberos is enabled, see 'kerberos' in the main config),
+                  place 'kerberos' element instead of 'password' (and similar) elements.
+                 The name part of the canonical principal name of the initiator must match the user name for authentication to succeed.
+                 You can also place 'realm' element inside 'kerberos' element to further restrict authentication to only those requests
+                  whose initiator's realm matches it.
+                 Example: <kerberos />
+                 Example: <kerberos><realm>EXAMPLE.COM</realm></kerberos>
+
+                 How to generate decent password:
+                 Execute: PASSWORD=$(base64 < /dev/urandom | head -c8); echo "$PASSWORD"; echo -n "$PASSWORD" | sha256sum | tr -d '-'
+                 In first line will be password and in second - corresponding SHA256.
+
+                 How to generate double SHA1:
+                 Execute: PASSWORD=$(base64 < /dev/urandom | head -c8); echo "$PASSWORD"; echo -n "$PASSWORD" | sha1sum | tr -d '-' | xxd -r -p | sha1sum | tr -d '-'
+                 In first line will be password and in second - corresponding double SHA1.
+            -->
+            <password/>
+
+            <!-- List of networks with open access.
+
+                 To open access from everywhere, specify:
+                    <ip>::/0</ip>
+
+                 To open access only from localhost, specify:
+                    <ip>::1</ip>
+                    <ip>127.0.0.1</ip>
+
+                 Each element of list has one of the following forms:
+                 <ip> IP-address or network mask. Examples: 213.180.204.3 or 10.0.0.1/8 or 10.0.0.1/255.255.255.0
+                     2a02:6b8::3 or 2a02:6b8::3/64 or 2a02:6b8::3/ffff:ffff:ffff:ffff::.
+                 <host> Hostname. Example: server01.clickhouse.com.
+                     To check access, DNS query is performed, and all received addresses compared to peer address.
+                 <host_regexp> Regular expression for host names. Example, ^server\d\d-\d\d-\d\.clickhouse\.com$
+                     To check access, DNS PTR query is performed for peer address and then regexp is applied.
+                     Then, for result of PTR query, another DNS query is performed and all received addresses compared to peer address.
+                     Strongly recommended that regexp is ends with $
+                 All results of DNS requests are cached till server restart.
+            -->
+            <networks replace="replace">
+                <ip>::1</ip>
+                <ip>127.0.0.1</ip>
+            </networks>
+
+            <!-- Settings profile for user. -->
+            <profile>default</profile>
+
+            <!-- Quota for user. -->
+            <quota>default</quota>
+
+            <!-- User can create other users and grant rights to them. -->
+            <access_management>1</access_management>
+
+            <!-- User can manipulate named collections. -->
+            <named_collection_control>1</named_collection_control>
+
+            <!-- User permissions can be granted here -->
+            <!--
+            <grants>
+                <query>GRANT ALL ON *.*</query>
+            </grants>
+            -->
+        
+            
+            
+            <show_named_collections_secrets>1</show_named_collections_secrets>
+        
+            
+        </default>
+    
+        
+    
+        
+    <ci_logs_sender>
+            <profile>ci_logs_sender</profile>
+            <no_password>true</no_password>
+            <networks>
+                <ip>::1</ip>
+                <ip>127.0.0.1</ip>
+            </networks>
+        </ci_logs_sender>
+        <readonly>
+            <password/>
+
+            <networks>
+                <ip>::1</ip>
+                <ip>127.0.0.1</ip>
+            </networks>
+            <profile>readonly</profile>
+            <quota>default</quota>
+        </readonly>
+    
+        <session_log_test_xml_user>
+            <no_password/>
+
+            <networks>
+                <ip>::1</ip>
+                <ip>127.0.0.1</ip>
+            </networks>
+            <profile>session_log_test_xml_profile</profile>
+            <quota>default</quota>
+        </session_log_test_xml_user>
+    </users>
+
+    <!-- Quotas. -->
+    <quotas>
+        <!-- Name of quota. -->
+        <default>
+            <!-- Limits for time interval. You could specify many intervals with different limits. -->
+            <interval>
+                <!-- Length of interval. -->
+                <duration>3600</duration>
+
+                <!-- No limits. Just calculate resource usage for time interval. -->
+                <queries>0</queries>
+                <errors>0</errors>
+                <result_rows>0</result_rows>
+                <read_rows>0</read_rows>
+                <execution_time>0</execution_time>
+            </interval>
+        </default>
+    </quotas>
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+    <roles>
+        <session_log_test_xml_role>
+        </session_log_test_xml_role>
+    </roles>
+
+    
+
+    
+</clickhouse>

@@ -1,0 +1,13 @@
+columns substreams version: 1
+4 columns:
+1 substreams for column `k`:
+	k
+2 substreams for column `val`:
+	val.null
+	val
+3 substreams for column `cat`:
+	cat.dict_prefix
+	cat.dict
+	cat
+1 substreams for column `r`:
+	r

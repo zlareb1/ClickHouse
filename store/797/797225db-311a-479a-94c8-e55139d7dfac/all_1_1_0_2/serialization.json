@@ -1,0 +1,1 @@
+{"columns":[{"kind":"Default","name":"k","num_defaults":10,"num_rows":100000},{"kind":"Default","name":"val","num_defaults":480,"num_rows":100000}],"types_serialization_versions":{"string":1},"version":1}

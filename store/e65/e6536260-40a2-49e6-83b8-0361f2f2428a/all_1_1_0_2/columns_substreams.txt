@@ -1,0 +1,8 @@
+columns substreams version: 1
+2 columns:
+1 substreams for column `p_partkey`:
+	p_partkey
+3 substreams for column `p_type`:
+	p_type.dict_prefix
+	p_type.dict
+	p_type

@@ -1,0 +1,21 @@
+columns substreams version: 1
+7 columns:
+1 substreams for column `id`:
+	id
+1 substreams for column `call_date`:
+	call_date
+2 substreams for column `status`:
+	status.null
+	status
+2 substreams for column `status_message`:
+	status_message.null
+	status_message
+2 substreams for column `lock_time`:
+	lock_time.null
+	lock_time
+2 substreams for column `number_of_locks`:
+	number_of_locks.sparse.idx
+	number_of_locks
+2 substreams for column `deleted_at`:
+	deleted_at.null
+	deleted_at

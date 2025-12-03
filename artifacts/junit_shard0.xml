@@ -1,0 +1,3281 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="20" skipped="0" tests="20" time="44.553" timestamp="2025-12-03T16:58:27.244209+00:00" hostname="ip-10-2-3-62"><testcase classname="tests.stress.keeper.tests.test_scenarios" name="test_scenario[CHA-01[default|t3]]" time="2.274"><failure message="Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-01[default|t3]-local-287f6741/.env --project-name ubuntutestscha01defaultt3local287f6741 --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-01[default|t3]-local-287f6741/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-01[default|t3]-local-287f6741/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-01[default|t3]-local-287f6741/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestscha01defaultt3local287f6741_default  Creating&#10; Network ubuntutestscha01defaultt3local287f6741_default  Error&#10;failed to create network ubuntutestscha01defaultt3local287f6741_default: Error response from daemon: all predefined address pools have been fully subnetted">scenario = {'backend': 'default', 'faults': [{'delay_ms': 10, 'duration_s': 180, 'jitter_ms': 5, 'kind': 'netem', ...}, {'duratio...ate_le'}, {'type': 'p99_le'}, {'type': 'log_sanity_ok'}, {'type': 'health_precheck'}], 'id': 'CHA-01[default|t3]', ...}
+cluster_factory = &lt;function cluster_factory.&lt;locals&gt;._make at 0xe4851eb376a0&gt;
+request = &lt;FixtureRequest for &lt;Function test_scenario[CHA-01[default|t3]]&gt;&gt;
+run_meta = {'backend': 'default', 'commit_sha': 'local'}
+
+    @pytest.mark.timeout(2400)
+    def test_scenario(scenario, cluster_factory, request, run_meta):
+        start_ts = time.time()
+        topo=scenario.get("topology",3)
+        flags=scenario.get("keeper_flags_xml","")
+        backend = scenario.get("backend") or request.config.getoption("--keeper-backend")
+        # Effective run_meta per test with the scenario-selected backend
+        run_meta_eff = dict(run_meta or {})
+        try:
+            run_meta_eff["backend"] = backend
+        except Exception:
+            pass
+        opts=scenario.get("opts", {})
+        try:
+            faults_mode = request.config.getoption("--faults")
+        except Exception:
+            faults_mode = os.environ.get("KEEPER_FAULTS", "on")
+        try:
+            rnd_count = int(request.config.getoption("--random-faults-count") or 1)
+        except Exception:
+            rnd_count = int(os.environ.get("KEEPER_RANDOM_FAULTS_COUNT", "1"))
+        try:
+            seed_val = int(request.config.getoption("--seed") or 0)
+        except Exception:
+            seed_val = 0
+        fs_original = scenario.get("faults", []) or []
+        fs_effective = fs_original
+        if faults_mode == "off":
+            fs_effective = []
+        elif faults_mode == "random":
+            try:
+                dur_default = int((scenario.get("workload") or {}).get("duration") or request.config.getoption("--duration"))
+            except Exception:
+                dur_default = int(os.environ.get("KEEPER_DURATION", "120"))
+            if seed_val &lt;= 0:
+                import os as _os
+                seed_val = int.from_bytes(_os.urandom(4), 'big')
+            try:
+                try:
+                    inc_raw = request.config.getoption("--random-faults-include") or os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                except Exception:
+                    inc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                try:
+                    exc_raw = request.config.getoption("--random-faults-exclude") or os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                except Exception:
+                    exc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                inc = set([x.strip() for x in (inc_raw or "").split(",") if x.strip()])
+                exc = set([x.strip() for x in (exc_raw or "").split(",") if x.strip()])
+                cands = [k for k in list(getattr(fault_registry, 'keys', lambda: [])()) if k not in _FUZZ_EXCLUDE]
+                if not cands and isinstance(fault_registry, dict):
+                    cands = [k for k in fault_registry.keys() if k not in _FUZZ_EXCLUDE]
+                weights = {}
+                if inc:
+                    for k in cands:
+                        weights[k] = 1 if k in inc else 0
+                else:
+                    for k in cands:
+                        weights[k] = 0 if k in exc else 1
+                fz = generate_fuzz_scenario(seed_val, max(1, rnd_count), dur_default, weights=weights)
+                rnd_faults = fz.get("faults", []) or []
+                rb = {"kind": "run_bench", "duration_s": dur_default}
+                fs_effective = [{"kind": "parallel", "steps": [rb] + rnd_faults}]
+            except Exception:
+                fs_effective = fs_original
+        try:
+            uses_dm = any((f.get("kind") in ("dm_delay","dm_error")) for f in fs_effective)
+            if uses_dm:
+                os.environ.setdefault("KEEPER_PRIVILEGED", "1")
+                os.environ.setdefault("KEEPER_HOST_AUTO_PROVISION", "1")
+            # Relax log gate for known transient errors during chaos if not provided by env
+            os.environ.setdefault(
+                "KEEPER_LOG_ALLOW",
+                "failed to read rpc header.*End of file|DNS error|Not found address of host|Net Exception: Socket is not connected|CANNOT_READ_ALL_DATA|Cannot read all data|Unknown table.*system\\.trace_log|Unknown table expression identifier 'system\\.trace_log'"
+            )
+        except Exception:
+            pass
+        # compute run_id early for reproducible artifact paths
+        run_id=f"{scenario.get('id','')}-{run_meta.get('commit_sha','local')}-{uuid.uuid4().hex[:8]}"
+        # Use a unique cluster name per test to avoid instance-dir collisions
+        try:
+            cname = run_id.replace('/', '_').replace(' ', '_')
+            os.environ["KEEPER_CLUSTER_NAME"] = cname
+        except Exception:
+            pass
+&gt;       cluster, nodes = cluster_factory(topo, backend, opts)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/stress/keeper/tests/test_scenarios.py:215: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/stress/keeper/tests/conftest.py:86: in _make
+    cluster, nodes = builder.build(topology=topology, backend=backend, opts=opts)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/core/cluster.py:200: in build
+    cluster.start()
+tests/integration/helpers/cluster.py:3728: in start
+    run_and_check(clickhouse_start_cmd)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ['docker', 'compose', '--env-file', '/home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-01[default|t3]-local-287f6741/.env', '--project-name', 'ubuntutestscha01defaultt3local287f6741', ...]
+env = None, shell = False, stdout = -1, stderr = -1, timeout = 300
+nothrow = False, detach = False
+
+    def run_and_check(
+        args: Union[Sequence[str], str],
+        env=None,
+        shell=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=300,
+        nothrow=False,
+        detach=False,
+    ) -&gt; str:
+        if shell:
+            if isinstance(args, str):
+                shell_args = args
+            else:
+                shell_args = next(a for a in args)
+        else:
+            shell_args = " ".join(args)
+    
+        logging.debug("Command:[%s]", shell_args)
+        if detach:
+            subprocess.Popen(
+                args,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                shell=shell,
+            )
+            return ""
+    
+        res = subprocess.run(
+            args,
+            stdout=stdout,
+            stderr=stderr,
+            env=env,
+            shell=shell,
+            timeout=timeout,
+            check=False,
+        )
+        out = res.stdout.decode("utf-8", "ignore")
+        err = res.stderr.decode("utf-8", "ignore")
+        # check_call(...) from subprocess does not print stderr, so we do it manually
+        for outline in out.splitlines():
+            logging.debug("Stdout:%s", outline)
+        for errline in err.splitlines():
+            logging.debug("Stderr:%s", errline)
+        if res.returncode != 0:
+            logging.debug("Exitcode:%s", res.returncode)
+            if env:
+                logging.debug("Env:%s", env)
+            if not nothrow:
+&gt;               raise Exception(
+                    f"Command [{shell_args}] return non-zero code {res.returncode}: {res.stderr.decode('utf-8')}"
+                )
+E               Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-01[default|t3]-local-287f6741/.env --project-name ubuntutestscha01defaultt3local287f6741 --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-01[default|t3]-local-287f6741/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-01[default|t3]-local-287f6741/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-01[default|t3]-local-287f6741/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestscha01defaultt3local287f6741_default  Creating
+E                Network ubuntutestscha01defaultt3local287f6741_default  Error
+E               failed to create network ubuntutestscha01defaultt3local287f6741_default: Error response from daemon: all predefined address pools have been fully subnetted
+
+tests/integration/helpers/cluster.py:191: Exception</failure></testcase><testcase classname="tests.stress.keeper.tests.test_scenarios" name="test_scenario[CHA-01[rocksdb|t3]]" time="1.274"><failure message="Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-01[rocksdb|t3]-local-b301abc0/.env --project-name ubuntutestscha01rocksdbt3localb301abc0 --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-01[rocksdb|t3]-local-b301abc0/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-01[rocksdb|t3]-local-b301abc0/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-01[rocksdb|t3]-local-b301abc0/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestscha01rocksdbt3localb301abc0_default  Creating&#10; Network ubuntutestscha01rocksdbt3localb301abc0_default  Error&#10;failed to create network ubuntutestscha01rocksdbt3localb301abc0_default: Error response from daemon: all predefined address pools have been fully subnetted">scenario = {'backend': 'rocksdb', 'faults': [{'delay_ms': 10, 'duration_s': 180, 'jitter_ms': 5, 'kind': 'netem', ...}, {'duratio...ate_le'}, {'type': 'p99_le'}, {'type': 'log_sanity_ok'}, {'type': 'health_precheck'}], 'id': 'CHA-01[rocksdb|t3]', ...}
+cluster_factory = &lt;function cluster_factory.&lt;locals&gt;._make at 0xe4851eca5300&gt;
+request = &lt;FixtureRequest for &lt;Function test_scenario[CHA-01[rocksdb|t3]]&gt;&gt;
+run_meta = {'backend': 'default', 'commit_sha': 'local'}
+
+    @pytest.mark.timeout(2400)
+    def test_scenario(scenario, cluster_factory, request, run_meta):
+        start_ts = time.time()
+        topo=scenario.get("topology",3)
+        flags=scenario.get("keeper_flags_xml","")
+        backend = scenario.get("backend") or request.config.getoption("--keeper-backend")
+        # Effective run_meta per test with the scenario-selected backend
+        run_meta_eff = dict(run_meta or {})
+        try:
+            run_meta_eff["backend"] = backend
+        except Exception:
+            pass
+        opts=scenario.get("opts", {})
+        try:
+            faults_mode = request.config.getoption("--faults")
+        except Exception:
+            faults_mode = os.environ.get("KEEPER_FAULTS", "on")
+        try:
+            rnd_count = int(request.config.getoption("--random-faults-count") or 1)
+        except Exception:
+            rnd_count = int(os.environ.get("KEEPER_RANDOM_FAULTS_COUNT", "1"))
+        try:
+            seed_val = int(request.config.getoption("--seed") or 0)
+        except Exception:
+            seed_val = 0
+        fs_original = scenario.get("faults", []) or []
+        fs_effective = fs_original
+        if faults_mode == "off":
+            fs_effective = []
+        elif faults_mode == "random":
+            try:
+                dur_default = int((scenario.get("workload") or {}).get("duration") or request.config.getoption("--duration"))
+            except Exception:
+                dur_default = int(os.environ.get("KEEPER_DURATION", "120"))
+            if seed_val &lt;= 0:
+                import os as _os
+                seed_val = int.from_bytes(_os.urandom(4), 'big')
+            try:
+                try:
+                    inc_raw = request.config.getoption("--random-faults-include") or os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                except Exception:
+                    inc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                try:
+                    exc_raw = request.config.getoption("--random-faults-exclude") or os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                except Exception:
+                    exc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                inc = set([x.strip() for x in (inc_raw or "").split(",") if x.strip()])
+                exc = set([x.strip() for x in (exc_raw or "").split(",") if x.strip()])
+                cands = [k for k in list(getattr(fault_registry, 'keys', lambda: [])()) if k not in _FUZZ_EXCLUDE]
+                if not cands and isinstance(fault_registry, dict):
+                    cands = [k for k in fault_registry.keys() if k not in _FUZZ_EXCLUDE]
+                weights = {}
+                if inc:
+                    for k in cands:
+                        weights[k] = 1 if k in inc else 0
+                else:
+                    for k in cands:
+                        weights[k] = 0 if k in exc else 1
+                fz = generate_fuzz_scenario(seed_val, max(1, rnd_count), dur_default, weights=weights)
+                rnd_faults = fz.get("faults", []) or []
+                rb = {"kind": "run_bench", "duration_s": dur_default}
+                fs_effective = [{"kind": "parallel", "steps": [rb] + rnd_faults}]
+            except Exception:
+                fs_effective = fs_original
+        try:
+            uses_dm = any((f.get("kind") in ("dm_delay","dm_error")) for f in fs_effective)
+            if uses_dm:
+                os.environ.setdefault("KEEPER_PRIVILEGED", "1")
+                os.environ.setdefault("KEEPER_HOST_AUTO_PROVISION", "1")
+            # Relax log gate for known transient errors during chaos if not provided by env
+            os.environ.setdefault(
+                "KEEPER_LOG_ALLOW",
+                "failed to read rpc header.*End of file|DNS error|Not found address of host|Net Exception: Socket is not connected|CANNOT_READ_ALL_DATA|Cannot read all data|Unknown table.*system\\.trace_log|Unknown table expression identifier 'system\\.trace_log'"
+            )
+        except Exception:
+            pass
+        # compute run_id early for reproducible artifact paths
+        run_id=f"{scenario.get('id','')}-{run_meta.get('commit_sha','local')}-{uuid.uuid4().hex[:8]}"
+        # Use a unique cluster name per test to avoid instance-dir collisions
+        try:
+            cname = run_id.replace('/', '_').replace(' ', '_')
+            os.environ["KEEPER_CLUSTER_NAME"] = cname
+        except Exception:
+            pass
+&gt;       cluster, nodes = cluster_factory(topo, backend, opts)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/stress/keeper/tests/test_scenarios.py:215: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/stress/keeper/tests/conftest.py:86: in _make
+    cluster, nodes = builder.build(topology=topology, backend=backend, opts=opts)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/core/cluster.py:200: in build
+    cluster.start()
+tests/integration/helpers/cluster.py:3728: in start
+    run_and_check(clickhouse_start_cmd)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ['docker', 'compose', '--env-file', '/home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-01[rocksdb|t3]-local-b301abc0/.env', '--project-name', 'ubuntutestscha01rocksdbt3localb301abc0', ...]
+env = None, shell = False, stdout = -1, stderr = -1, timeout = 300
+nothrow = False, detach = False
+
+    def run_and_check(
+        args: Union[Sequence[str], str],
+        env=None,
+        shell=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=300,
+        nothrow=False,
+        detach=False,
+    ) -&gt; str:
+        if shell:
+            if isinstance(args, str):
+                shell_args = args
+            else:
+                shell_args = next(a for a in args)
+        else:
+            shell_args = " ".join(args)
+    
+        logging.debug("Command:[%s]", shell_args)
+        if detach:
+            subprocess.Popen(
+                args,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                shell=shell,
+            )
+            return ""
+    
+        res = subprocess.run(
+            args,
+            stdout=stdout,
+            stderr=stderr,
+            env=env,
+            shell=shell,
+            timeout=timeout,
+            check=False,
+        )
+        out = res.stdout.decode("utf-8", "ignore")
+        err = res.stderr.decode("utf-8", "ignore")
+        # check_call(...) from subprocess does not print stderr, so we do it manually
+        for outline in out.splitlines():
+            logging.debug("Stdout:%s", outline)
+        for errline in err.splitlines():
+            logging.debug("Stderr:%s", errline)
+        if res.returncode != 0:
+            logging.debug("Exitcode:%s", res.returncode)
+            if env:
+                logging.debug("Env:%s", env)
+            if not nothrow:
+&gt;               raise Exception(
+                    f"Command [{shell_args}] return non-zero code {res.returncode}: {res.stderr.decode('utf-8')}"
+                )
+E               Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-01[rocksdb|t3]-local-b301abc0/.env --project-name ubuntutestscha01rocksdbt3localb301abc0 --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-01[rocksdb|t3]-local-b301abc0/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-01[rocksdb|t3]-local-b301abc0/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-01[rocksdb|t3]-local-b301abc0/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestscha01rocksdbt3localb301abc0_default  Creating
+E                Network ubuntutestscha01rocksdbt3localb301abc0_default  Error
+E               failed to create network ubuntutestscha01rocksdbt3localb301abc0_default: Error response from daemon: all predefined address pools have been fully subnetted
+
+tests/integration/helpers/cluster.py:191: Exception</failure></testcase><testcase classname="tests.stress.keeper.tests.test_scenarios" name="test_scenario[LDR-02[default|t3]]" time="1.297"><failure message="Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-LDR-02[default|t3]-local-eca9e1ae/.env --project-name ubuntutestsldr02defaultt3localeca9e1ae --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-LDR-02[default|t3]-local-eca9e1ae/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-LDR-02[default|t3]-local-eca9e1ae/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-LDR-02[default|t3]-local-eca9e1ae/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestsldr02defaultt3localeca9e1ae_default  Creating&#10; Network ubuntutestsldr02defaultt3localeca9e1ae_default  Error&#10;failed to create network ubuntutestsldr02defaultt3localeca9e1ae_default: Error response from daemon: all predefined address pools have been fully subnetted">scenario = {'backend': 'default', 'faults': [{'kind': 'partition_oneway', True: 'leader', 'duration_s': 30}], 'gates': [{'type': ...'}, {'max_ratio': 0.1, 'type': 'error_rate_le'}, {'max_ms': 10000, 'type': 'p99_le'}], 'id': 'LDR-02[default|t3]', ...}
+cluster_factory = &lt;function cluster_factory.&lt;locals&gt;._make at 0xe4851eedc040&gt;
+request = &lt;FixtureRequest for &lt;Function test_scenario[LDR-02[default|t3]]&gt;&gt;
+run_meta = {'backend': 'default', 'commit_sha': 'local'}
+
+    @pytest.mark.timeout(2400)
+    def test_scenario(scenario, cluster_factory, request, run_meta):
+        start_ts = time.time()
+        topo=scenario.get("topology",3)
+        flags=scenario.get("keeper_flags_xml","")
+        backend = scenario.get("backend") or request.config.getoption("--keeper-backend")
+        # Effective run_meta per test with the scenario-selected backend
+        run_meta_eff = dict(run_meta or {})
+        try:
+            run_meta_eff["backend"] = backend
+        except Exception:
+            pass
+        opts=scenario.get("opts", {})
+        try:
+            faults_mode = request.config.getoption("--faults")
+        except Exception:
+            faults_mode = os.environ.get("KEEPER_FAULTS", "on")
+        try:
+            rnd_count = int(request.config.getoption("--random-faults-count") or 1)
+        except Exception:
+            rnd_count = int(os.environ.get("KEEPER_RANDOM_FAULTS_COUNT", "1"))
+        try:
+            seed_val = int(request.config.getoption("--seed") or 0)
+        except Exception:
+            seed_val = 0
+        fs_original = scenario.get("faults", []) or []
+        fs_effective = fs_original
+        if faults_mode == "off":
+            fs_effective = []
+        elif faults_mode == "random":
+            try:
+                dur_default = int((scenario.get("workload") or {}).get("duration") or request.config.getoption("--duration"))
+            except Exception:
+                dur_default = int(os.environ.get("KEEPER_DURATION", "120"))
+            if seed_val &lt;= 0:
+                import os as _os
+                seed_val = int.from_bytes(_os.urandom(4), 'big')
+            try:
+                try:
+                    inc_raw = request.config.getoption("--random-faults-include") or os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                except Exception:
+                    inc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                try:
+                    exc_raw = request.config.getoption("--random-faults-exclude") or os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                except Exception:
+                    exc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                inc = set([x.strip() for x in (inc_raw or "").split(",") if x.strip()])
+                exc = set([x.strip() for x in (exc_raw or "").split(",") if x.strip()])
+                cands = [k for k in list(getattr(fault_registry, 'keys', lambda: [])()) if k not in _FUZZ_EXCLUDE]
+                if not cands and isinstance(fault_registry, dict):
+                    cands = [k for k in fault_registry.keys() if k not in _FUZZ_EXCLUDE]
+                weights = {}
+                if inc:
+                    for k in cands:
+                        weights[k] = 1 if k in inc else 0
+                else:
+                    for k in cands:
+                        weights[k] = 0 if k in exc else 1
+                fz = generate_fuzz_scenario(seed_val, max(1, rnd_count), dur_default, weights=weights)
+                rnd_faults = fz.get("faults", []) or []
+                rb = {"kind": "run_bench", "duration_s": dur_default}
+                fs_effective = [{"kind": "parallel", "steps": [rb] + rnd_faults}]
+            except Exception:
+                fs_effective = fs_original
+        try:
+            uses_dm = any((f.get("kind") in ("dm_delay","dm_error")) for f in fs_effective)
+            if uses_dm:
+                os.environ.setdefault("KEEPER_PRIVILEGED", "1")
+                os.environ.setdefault("KEEPER_HOST_AUTO_PROVISION", "1")
+            # Relax log gate for known transient errors during chaos if not provided by env
+            os.environ.setdefault(
+                "KEEPER_LOG_ALLOW",
+                "failed to read rpc header.*End of file|DNS error|Not found address of host|Net Exception: Socket is not connected|CANNOT_READ_ALL_DATA|Cannot read all data|Unknown table.*system\\.trace_log|Unknown table expression identifier 'system\\.trace_log'"
+            )
+        except Exception:
+            pass
+        # compute run_id early for reproducible artifact paths
+        run_id=f"{scenario.get('id','')}-{run_meta.get('commit_sha','local')}-{uuid.uuid4().hex[:8]}"
+        # Use a unique cluster name per test to avoid instance-dir collisions
+        try:
+            cname = run_id.replace('/', '_').replace(' ', '_')
+            os.environ["KEEPER_CLUSTER_NAME"] = cname
+        except Exception:
+            pass
+&gt;       cluster, nodes = cluster_factory(topo, backend, opts)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/stress/keeper/tests/test_scenarios.py:215: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/stress/keeper/tests/conftest.py:86: in _make
+    cluster, nodes = builder.build(topology=topology, backend=backend, opts=opts)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/core/cluster.py:200: in build
+    cluster.start()
+tests/integration/helpers/cluster.py:3728: in start
+    run_and_check(clickhouse_start_cmd)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ['docker', 'compose', '--env-file', '/home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-LDR-02[default|t3]-local-eca9e1ae/.env', '--project-name', 'ubuntutestsldr02defaultt3localeca9e1ae', ...]
+env = None, shell = False, stdout = -1, stderr = -1, timeout = 300
+nothrow = False, detach = False
+
+    def run_and_check(
+        args: Union[Sequence[str], str],
+        env=None,
+        shell=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=300,
+        nothrow=False,
+        detach=False,
+    ) -&gt; str:
+        if shell:
+            if isinstance(args, str):
+                shell_args = args
+            else:
+                shell_args = next(a for a in args)
+        else:
+            shell_args = " ".join(args)
+    
+        logging.debug("Command:[%s]", shell_args)
+        if detach:
+            subprocess.Popen(
+                args,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                shell=shell,
+            )
+            return ""
+    
+        res = subprocess.run(
+            args,
+            stdout=stdout,
+            stderr=stderr,
+            env=env,
+            shell=shell,
+            timeout=timeout,
+            check=False,
+        )
+        out = res.stdout.decode("utf-8", "ignore")
+        err = res.stderr.decode("utf-8", "ignore")
+        # check_call(...) from subprocess does not print stderr, so we do it manually
+        for outline in out.splitlines():
+            logging.debug("Stdout:%s", outline)
+        for errline in err.splitlines():
+            logging.debug("Stderr:%s", errline)
+        if res.returncode != 0:
+            logging.debug("Exitcode:%s", res.returncode)
+            if env:
+                logging.debug("Env:%s", env)
+            if not nothrow:
+&gt;               raise Exception(
+                    f"Command [{shell_args}] return non-zero code {res.returncode}: {res.stderr.decode('utf-8')}"
+                )
+E               Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-LDR-02[default|t3]-local-eca9e1ae/.env --project-name ubuntutestsldr02defaultt3localeca9e1ae --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-LDR-02[default|t3]-local-eca9e1ae/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-LDR-02[default|t3]-local-eca9e1ae/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-LDR-02[default|t3]-local-eca9e1ae/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestsldr02defaultt3localeca9e1ae_default  Creating
+E                Network ubuntutestsldr02defaultt3localeca9e1ae_default  Error
+E               failed to create network ubuntutestsldr02defaultt3localeca9e1ae_default: Error response from daemon: all predefined address pools have been fully subnetted
+
+tests/integration/helpers/cluster.py:191: Exception</failure></testcase><testcase classname="tests.stress.keeper.tests.test_scenarios" name="test_scenario[LDR-02[rocksdb|t3]]" time="1.310"><failure message="Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-LDR-02[rocksdb|t3]-local-ae3b87d5/.env --project-name ubuntutestsldr02rocksdbt3localae3b87d5 --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-LDR-02[rocksdb|t3]-local-ae3b87d5/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-LDR-02[rocksdb|t3]-local-ae3b87d5/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-LDR-02[rocksdb|t3]-local-ae3b87d5/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestsldr02rocksdbt3localae3b87d5_default  Creating&#10; Network ubuntutestsldr02rocksdbt3localae3b87d5_default  Error&#10;failed to create network ubuntutestsldr02rocksdbt3localae3b87d5_default: Error response from daemon: all predefined address pools have been fully subnetted">scenario = {'backend': 'rocksdb', 'faults': [{'kind': 'partition_oneway', True: 'leader', 'duration_s': 30}], 'gates': [{'type': ...'}, {'max_ratio': 0.1, 'type': 'error_rate_le'}, {'max_ms': 10000, 'type': 'p99_le'}], 'id': 'LDR-02[rocksdb|t3]', ...}
+cluster_factory = &lt;function cluster_factory.&lt;locals&gt;._make at 0xe4851eca7a60&gt;
+request = &lt;FixtureRequest for &lt;Function test_scenario[LDR-02[rocksdb|t3]]&gt;&gt;
+run_meta = {'backend': 'default', 'commit_sha': 'local'}
+
+    @pytest.mark.timeout(2400)
+    def test_scenario(scenario, cluster_factory, request, run_meta):
+        start_ts = time.time()
+        topo=scenario.get("topology",3)
+        flags=scenario.get("keeper_flags_xml","")
+        backend = scenario.get("backend") or request.config.getoption("--keeper-backend")
+        # Effective run_meta per test with the scenario-selected backend
+        run_meta_eff = dict(run_meta or {})
+        try:
+            run_meta_eff["backend"] = backend
+        except Exception:
+            pass
+        opts=scenario.get("opts", {})
+        try:
+            faults_mode = request.config.getoption("--faults")
+        except Exception:
+            faults_mode = os.environ.get("KEEPER_FAULTS", "on")
+        try:
+            rnd_count = int(request.config.getoption("--random-faults-count") or 1)
+        except Exception:
+            rnd_count = int(os.environ.get("KEEPER_RANDOM_FAULTS_COUNT", "1"))
+        try:
+            seed_val = int(request.config.getoption("--seed") or 0)
+        except Exception:
+            seed_val = 0
+        fs_original = scenario.get("faults", []) or []
+        fs_effective = fs_original
+        if faults_mode == "off":
+            fs_effective = []
+        elif faults_mode == "random":
+            try:
+                dur_default = int((scenario.get("workload") or {}).get("duration") or request.config.getoption("--duration"))
+            except Exception:
+                dur_default = int(os.environ.get("KEEPER_DURATION", "120"))
+            if seed_val &lt;= 0:
+                import os as _os
+                seed_val = int.from_bytes(_os.urandom(4), 'big')
+            try:
+                try:
+                    inc_raw = request.config.getoption("--random-faults-include") or os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                except Exception:
+                    inc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                try:
+                    exc_raw = request.config.getoption("--random-faults-exclude") or os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                except Exception:
+                    exc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                inc = set([x.strip() for x in (inc_raw or "").split(",") if x.strip()])
+                exc = set([x.strip() for x in (exc_raw or "").split(",") if x.strip()])
+                cands = [k for k in list(getattr(fault_registry, 'keys', lambda: [])()) if k not in _FUZZ_EXCLUDE]
+                if not cands and isinstance(fault_registry, dict):
+                    cands = [k for k in fault_registry.keys() if k not in _FUZZ_EXCLUDE]
+                weights = {}
+                if inc:
+                    for k in cands:
+                        weights[k] = 1 if k in inc else 0
+                else:
+                    for k in cands:
+                        weights[k] = 0 if k in exc else 1
+                fz = generate_fuzz_scenario(seed_val, max(1, rnd_count), dur_default, weights=weights)
+                rnd_faults = fz.get("faults", []) or []
+                rb = {"kind": "run_bench", "duration_s": dur_default}
+                fs_effective = [{"kind": "parallel", "steps": [rb] + rnd_faults}]
+            except Exception:
+                fs_effective = fs_original
+        try:
+            uses_dm = any((f.get("kind") in ("dm_delay","dm_error")) for f in fs_effective)
+            if uses_dm:
+                os.environ.setdefault("KEEPER_PRIVILEGED", "1")
+                os.environ.setdefault("KEEPER_HOST_AUTO_PROVISION", "1")
+            # Relax log gate for known transient errors during chaos if not provided by env
+            os.environ.setdefault(
+                "KEEPER_LOG_ALLOW",
+                "failed to read rpc header.*End of file|DNS error|Not found address of host|Net Exception: Socket is not connected|CANNOT_READ_ALL_DATA|Cannot read all data|Unknown table.*system\\.trace_log|Unknown table expression identifier 'system\\.trace_log'"
+            )
+        except Exception:
+            pass
+        # compute run_id early for reproducible artifact paths
+        run_id=f"{scenario.get('id','')}-{run_meta.get('commit_sha','local')}-{uuid.uuid4().hex[:8]}"
+        # Use a unique cluster name per test to avoid instance-dir collisions
+        try:
+            cname = run_id.replace('/', '_').replace(' ', '_')
+            os.environ["KEEPER_CLUSTER_NAME"] = cname
+        except Exception:
+            pass
+&gt;       cluster, nodes = cluster_factory(topo, backend, opts)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/stress/keeper/tests/test_scenarios.py:215: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/stress/keeper/tests/conftest.py:86: in _make
+    cluster, nodes = builder.build(topology=topology, backend=backend, opts=opts)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/core/cluster.py:200: in build
+    cluster.start()
+tests/integration/helpers/cluster.py:3728: in start
+    run_and_check(clickhouse_start_cmd)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ['docker', 'compose', '--env-file', '/home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-LDR-02[rocksdb|t3]-local-ae3b87d5/.env', '--project-name', 'ubuntutestsldr02rocksdbt3localae3b87d5', ...]
+env = None, shell = False, stdout = -1, stderr = -1, timeout = 300
+nothrow = False, detach = False
+
+    def run_and_check(
+        args: Union[Sequence[str], str],
+        env=None,
+        shell=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=300,
+        nothrow=False,
+        detach=False,
+    ) -&gt; str:
+        if shell:
+            if isinstance(args, str):
+                shell_args = args
+            else:
+                shell_args = next(a for a in args)
+        else:
+            shell_args = " ".join(args)
+    
+        logging.debug("Command:[%s]", shell_args)
+        if detach:
+            subprocess.Popen(
+                args,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                shell=shell,
+            )
+            return ""
+    
+        res = subprocess.run(
+            args,
+            stdout=stdout,
+            stderr=stderr,
+            env=env,
+            shell=shell,
+            timeout=timeout,
+            check=False,
+        )
+        out = res.stdout.decode("utf-8", "ignore")
+        err = res.stderr.decode("utf-8", "ignore")
+        # check_call(...) from subprocess does not print stderr, so we do it manually
+        for outline in out.splitlines():
+            logging.debug("Stdout:%s", outline)
+        for errline in err.splitlines():
+            logging.debug("Stderr:%s", errline)
+        if res.returncode != 0:
+            logging.debug("Exitcode:%s", res.returncode)
+            if env:
+                logging.debug("Env:%s", env)
+            if not nothrow:
+&gt;               raise Exception(
+                    f"Command [{shell_args}] return non-zero code {res.returncode}: {res.stderr.decode('utf-8')}"
+                )
+E               Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-LDR-02[rocksdb|t3]-local-ae3b87d5/.env --project-name ubuntutestsldr02rocksdbt3localae3b87d5 --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-LDR-02[rocksdb|t3]-local-ae3b87d5/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-LDR-02[rocksdb|t3]-local-ae3b87d5/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-LDR-02[rocksdb|t3]-local-ae3b87d5/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestsldr02rocksdbt3localae3b87d5_default  Creating
+E                Network ubuntutestsldr02rocksdbt3localae3b87d5_default  Error
+E               failed to create network ubuntutestsldr02rocksdbt3localae3b87d5_default: Error response from daemon: all predefined address pools have been fully subnetted
+
+tests/integration/helpers/cluster.py:191: Exception</failure></testcase><testcase classname="tests.stress.keeper.tests.test_scenarios" name="test_scenario[RCFG-06[default|t3]]" time="1.287"><failure message="Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-RCFG-06[default|t3]-local-c82d347b/.env --project-name ubuntutestsrcfg06defaultt3localc82d347b --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-RCFG-06[default|t3]-local-c82d347b/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-RCFG-06[default|t3]-local-c82d347b/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-RCFG-06[default|t3]-local-c82d347b/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestsrcfg06defaultt3localc82d347b_default  Creating&#10; Network ubuntutestsrcfg06defaultt3localc82d347b_default  Error&#10;failed to create network ubuntutestsrcfg06defaultt3localc82d347b_default: Error response from daemon: all predefined address pools have been fully subnetted">scenario = {'backend': 'default', 'faults': [{'kind': 'partition_symmetric_during', 'on': 'leader', 'steps': [{'kind': 'reconfig'...nfig_members_len_eq'}, {'type': 'backlog_drains'}, {'type': 'health_precheck'}, ...], 'id': 'RCFG-06[default|t3]', ...}
+cluster_factory = &lt;function cluster_factory.&lt;locals&gt;._make at 0xe4851eb31940&gt;
+request = &lt;FixtureRequest for &lt;Function test_scenario[RCFG-06[default|t3]]&gt;&gt;
+run_meta = {'backend': 'default', 'commit_sha': 'local'}
+
+    @pytest.mark.timeout(2400)
+    def test_scenario(scenario, cluster_factory, request, run_meta):
+        start_ts = time.time()
+        topo=scenario.get("topology",3)
+        flags=scenario.get("keeper_flags_xml","")
+        backend = scenario.get("backend") or request.config.getoption("--keeper-backend")
+        # Effective run_meta per test with the scenario-selected backend
+        run_meta_eff = dict(run_meta or {})
+        try:
+            run_meta_eff["backend"] = backend
+        except Exception:
+            pass
+        opts=scenario.get("opts", {})
+        try:
+            faults_mode = request.config.getoption("--faults")
+        except Exception:
+            faults_mode = os.environ.get("KEEPER_FAULTS", "on")
+        try:
+            rnd_count = int(request.config.getoption("--random-faults-count") or 1)
+        except Exception:
+            rnd_count = int(os.environ.get("KEEPER_RANDOM_FAULTS_COUNT", "1"))
+        try:
+            seed_val = int(request.config.getoption("--seed") or 0)
+        except Exception:
+            seed_val = 0
+        fs_original = scenario.get("faults", []) or []
+        fs_effective = fs_original
+        if faults_mode == "off":
+            fs_effective = []
+        elif faults_mode == "random":
+            try:
+                dur_default = int((scenario.get("workload") or {}).get("duration") or request.config.getoption("--duration"))
+            except Exception:
+                dur_default = int(os.environ.get("KEEPER_DURATION", "120"))
+            if seed_val &lt;= 0:
+                import os as _os
+                seed_val = int.from_bytes(_os.urandom(4), 'big')
+            try:
+                try:
+                    inc_raw = request.config.getoption("--random-faults-include") or os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                except Exception:
+                    inc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                try:
+                    exc_raw = request.config.getoption("--random-faults-exclude") or os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                except Exception:
+                    exc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                inc = set([x.strip() for x in (inc_raw or "").split(",") if x.strip()])
+                exc = set([x.strip() for x in (exc_raw or "").split(",") if x.strip()])
+                cands = [k for k in list(getattr(fault_registry, 'keys', lambda: [])()) if k not in _FUZZ_EXCLUDE]
+                if not cands and isinstance(fault_registry, dict):
+                    cands = [k for k in fault_registry.keys() if k not in _FUZZ_EXCLUDE]
+                weights = {}
+                if inc:
+                    for k in cands:
+                        weights[k] = 1 if k in inc else 0
+                else:
+                    for k in cands:
+                        weights[k] = 0 if k in exc else 1
+                fz = generate_fuzz_scenario(seed_val, max(1, rnd_count), dur_default, weights=weights)
+                rnd_faults = fz.get("faults", []) or []
+                rb = {"kind": "run_bench", "duration_s": dur_default}
+                fs_effective = [{"kind": "parallel", "steps": [rb] + rnd_faults}]
+            except Exception:
+                fs_effective = fs_original
+        try:
+            uses_dm = any((f.get("kind") in ("dm_delay","dm_error")) for f in fs_effective)
+            if uses_dm:
+                os.environ.setdefault("KEEPER_PRIVILEGED", "1")
+                os.environ.setdefault("KEEPER_HOST_AUTO_PROVISION", "1")
+            # Relax log gate for known transient errors during chaos if not provided by env
+            os.environ.setdefault(
+                "KEEPER_LOG_ALLOW",
+                "failed to read rpc header.*End of file|DNS error|Not found address of host|Net Exception: Socket is not connected|CANNOT_READ_ALL_DATA|Cannot read all data|Unknown table.*system\\.trace_log|Unknown table expression identifier 'system\\.trace_log'"
+            )
+        except Exception:
+            pass
+        # compute run_id early for reproducible artifact paths
+        run_id=f"{scenario.get('id','')}-{run_meta.get('commit_sha','local')}-{uuid.uuid4().hex[:8]}"
+        # Use a unique cluster name per test to avoid instance-dir collisions
+        try:
+            cname = run_id.replace('/', '_').replace(' ', '_')
+            os.environ["KEEPER_CLUSTER_NAME"] = cname
+        except Exception:
+            pass
+&gt;       cluster, nodes = cluster_factory(topo, backend, opts)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/stress/keeper/tests/test_scenarios.py:215: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/stress/keeper/tests/conftest.py:86: in _make
+    cluster, nodes = builder.build(topology=topology, backend=backend, opts=opts)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/core/cluster.py:200: in build
+    cluster.start()
+tests/integration/helpers/cluster.py:3728: in start
+    run_and_check(clickhouse_start_cmd)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ['docker', 'compose', '--env-file', '/home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-RCFG-06[default|t3]-local-c82d347b/.env', '--project-name', 'ubuntutestsrcfg06defaultt3localc82d347b', ...]
+env = None, shell = False, stdout = -1, stderr = -1, timeout = 300
+nothrow = False, detach = False
+
+    def run_and_check(
+        args: Union[Sequence[str], str],
+        env=None,
+        shell=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=300,
+        nothrow=False,
+        detach=False,
+    ) -&gt; str:
+        if shell:
+            if isinstance(args, str):
+                shell_args = args
+            else:
+                shell_args = next(a for a in args)
+        else:
+            shell_args = " ".join(args)
+    
+        logging.debug("Command:[%s]", shell_args)
+        if detach:
+            subprocess.Popen(
+                args,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                shell=shell,
+            )
+            return ""
+    
+        res = subprocess.run(
+            args,
+            stdout=stdout,
+            stderr=stderr,
+            env=env,
+            shell=shell,
+            timeout=timeout,
+            check=False,
+        )
+        out = res.stdout.decode("utf-8", "ignore")
+        err = res.stderr.decode("utf-8", "ignore")
+        # check_call(...) from subprocess does not print stderr, so we do it manually
+        for outline in out.splitlines():
+            logging.debug("Stdout:%s", outline)
+        for errline in err.splitlines():
+            logging.debug("Stderr:%s", errline)
+        if res.returncode != 0:
+            logging.debug("Exitcode:%s", res.returncode)
+            if env:
+                logging.debug("Env:%s", env)
+            if not nothrow:
+&gt;               raise Exception(
+                    f"Command [{shell_args}] return non-zero code {res.returncode}: {res.stderr.decode('utf-8')}"
+                )
+E               Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-RCFG-06[default|t3]-local-c82d347b/.env --project-name ubuntutestsrcfg06defaultt3localc82d347b --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-RCFG-06[default|t3]-local-c82d347b/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-RCFG-06[default|t3]-local-c82d347b/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-RCFG-06[default|t3]-local-c82d347b/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestsrcfg06defaultt3localc82d347b_default  Creating
+E                Network ubuntutestsrcfg06defaultt3localc82d347b_default  Error
+E               failed to create network ubuntutestsrcfg06defaultt3localc82d347b_default: Error response from daemon: all predefined address pools have been fully subnetted
+
+tests/integration/helpers/cluster.py:191: Exception</failure></testcase><testcase classname="tests.stress.keeper.tests.test_scenarios" name="test_scenario[RCFG-06[rocksdb|t3]]" time="1.310"><failure message="Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-RCFG-06[rocksdb|t3]-local-997426e5/.env --project-name ubuntutestsrcfg06rocksdbt3local997426e5 --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-RCFG-06[rocksdb|t3]-local-997426e5/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-RCFG-06[rocksdb|t3]-local-997426e5/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-RCFG-06[rocksdb|t3]-local-997426e5/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestsrcfg06rocksdbt3local997426e5_default  Creating&#10; Network ubuntutestsrcfg06rocksdbt3local997426e5_default  Error&#10;failed to create network ubuntutestsrcfg06rocksdbt3local997426e5_default: Error response from daemon: all predefined address pools have been fully subnetted">scenario = {'backend': 'rocksdb', 'faults': [{'kind': 'partition_symmetric_during', 'on': 'leader', 'steps': [{'kind': 'reconfig'...nfig_members_len_eq'}, {'type': 'backlog_drains'}, {'type': 'health_precheck'}, ...], 'id': 'RCFG-06[rocksdb|t3]', ...}
+cluster_factory = &lt;function cluster_factory.&lt;locals&gt;._make at 0xe4851eca7b00&gt;
+request = &lt;FixtureRequest for &lt;Function test_scenario[RCFG-06[rocksdb|t3]]&gt;&gt;
+run_meta = {'backend': 'default', 'commit_sha': 'local'}
+
+    @pytest.mark.timeout(2400)
+    def test_scenario(scenario, cluster_factory, request, run_meta):
+        start_ts = time.time()
+        topo=scenario.get("topology",3)
+        flags=scenario.get("keeper_flags_xml","")
+        backend = scenario.get("backend") or request.config.getoption("--keeper-backend")
+        # Effective run_meta per test with the scenario-selected backend
+        run_meta_eff = dict(run_meta or {})
+        try:
+            run_meta_eff["backend"] = backend
+        except Exception:
+            pass
+        opts=scenario.get("opts", {})
+        try:
+            faults_mode = request.config.getoption("--faults")
+        except Exception:
+            faults_mode = os.environ.get("KEEPER_FAULTS", "on")
+        try:
+            rnd_count = int(request.config.getoption("--random-faults-count") or 1)
+        except Exception:
+            rnd_count = int(os.environ.get("KEEPER_RANDOM_FAULTS_COUNT", "1"))
+        try:
+            seed_val = int(request.config.getoption("--seed") or 0)
+        except Exception:
+            seed_val = 0
+        fs_original = scenario.get("faults", []) or []
+        fs_effective = fs_original
+        if faults_mode == "off":
+            fs_effective = []
+        elif faults_mode == "random":
+            try:
+                dur_default = int((scenario.get("workload") or {}).get("duration") or request.config.getoption("--duration"))
+            except Exception:
+                dur_default = int(os.environ.get("KEEPER_DURATION", "120"))
+            if seed_val &lt;= 0:
+                import os as _os
+                seed_val = int.from_bytes(_os.urandom(4), 'big')
+            try:
+                try:
+                    inc_raw = request.config.getoption("--random-faults-include") or os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                except Exception:
+                    inc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                try:
+                    exc_raw = request.config.getoption("--random-faults-exclude") or os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                except Exception:
+                    exc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                inc = set([x.strip() for x in (inc_raw or "").split(",") if x.strip()])
+                exc = set([x.strip() for x in (exc_raw or "").split(",") if x.strip()])
+                cands = [k for k in list(getattr(fault_registry, 'keys', lambda: [])()) if k not in _FUZZ_EXCLUDE]
+                if not cands and isinstance(fault_registry, dict):
+                    cands = [k for k in fault_registry.keys() if k not in _FUZZ_EXCLUDE]
+                weights = {}
+                if inc:
+                    for k in cands:
+                        weights[k] = 1 if k in inc else 0
+                else:
+                    for k in cands:
+                        weights[k] = 0 if k in exc else 1
+                fz = generate_fuzz_scenario(seed_val, max(1, rnd_count), dur_default, weights=weights)
+                rnd_faults = fz.get("faults", []) or []
+                rb = {"kind": "run_bench", "duration_s": dur_default}
+                fs_effective = [{"kind": "parallel", "steps": [rb] + rnd_faults}]
+            except Exception:
+                fs_effective = fs_original
+        try:
+            uses_dm = any((f.get("kind") in ("dm_delay","dm_error")) for f in fs_effective)
+            if uses_dm:
+                os.environ.setdefault("KEEPER_PRIVILEGED", "1")
+                os.environ.setdefault("KEEPER_HOST_AUTO_PROVISION", "1")
+            # Relax log gate for known transient errors during chaos if not provided by env
+            os.environ.setdefault(
+                "KEEPER_LOG_ALLOW",
+                "failed to read rpc header.*End of file|DNS error|Not found address of host|Net Exception: Socket is not connected|CANNOT_READ_ALL_DATA|Cannot read all data|Unknown table.*system\\.trace_log|Unknown table expression identifier 'system\\.trace_log'"
+            )
+        except Exception:
+            pass
+        # compute run_id early for reproducible artifact paths
+        run_id=f"{scenario.get('id','')}-{run_meta.get('commit_sha','local')}-{uuid.uuid4().hex[:8]}"
+        # Use a unique cluster name per test to avoid instance-dir collisions
+        try:
+            cname = run_id.replace('/', '_').replace(' ', '_')
+            os.environ["KEEPER_CLUSTER_NAME"] = cname
+        except Exception:
+            pass
+&gt;       cluster, nodes = cluster_factory(topo, backend, opts)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/stress/keeper/tests/test_scenarios.py:215: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/stress/keeper/tests/conftest.py:86: in _make
+    cluster, nodes = builder.build(topology=topology, backend=backend, opts=opts)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/core/cluster.py:200: in build
+    cluster.start()
+tests/integration/helpers/cluster.py:3728: in start
+    run_and_check(clickhouse_start_cmd)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ['docker', 'compose', '--env-file', '/home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-RCFG-06[rocksdb|t3]-local-997426e5/.env', '--project-name', 'ubuntutestsrcfg06rocksdbt3local997426e5', ...]
+env = None, shell = False, stdout = -1, stderr = -1, timeout = 300
+nothrow = False, detach = False
+
+    def run_and_check(
+        args: Union[Sequence[str], str],
+        env=None,
+        shell=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=300,
+        nothrow=False,
+        detach=False,
+    ) -&gt; str:
+        if shell:
+            if isinstance(args, str):
+                shell_args = args
+            else:
+                shell_args = next(a for a in args)
+        else:
+            shell_args = " ".join(args)
+    
+        logging.debug("Command:[%s]", shell_args)
+        if detach:
+            subprocess.Popen(
+                args,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                shell=shell,
+            )
+            return ""
+    
+        res = subprocess.run(
+            args,
+            stdout=stdout,
+            stderr=stderr,
+            env=env,
+            shell=shell,
+            timeout=timeout,
+            check=False,
+        )
+        out = res.stdout.decode("utf-8", "ignore")
+        err = res.stderr.decode("utf-8", "ignore")
+        # check_call(...) from subprocess does not print stderr, so we do it manually
+        for outline in out.splitlines():
+            logging.debug("Stdout:%s", outline)
+        for errline in err.splitlines():
+            logging.debug("Stderr:%s", errline)
+        if res.returncode != 0:
+            logging.debug("Exitcode:%s", res.returncode)
+            if env:
+                logging.debug("Env:%s", env)
+            if not nothrow:
+&gt;               raise Exception(
+                    f"Command [{shell_args}] return non-zero code {res.returncode}: {res.stderr.decode('utf-8')}"
+                )
+E               Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-RCFG-06[rocksdb|t3]-local-997426e5/.env --project-name ubuntutestsrcfg06rocksdbt3local997426e5 --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-RCFG-06[rocksdb|t3]-local-997426e5/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-RCFG-06[rocksdb|t3]-local-997426e5/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-RCFG-06[rocksdb|t3]-local-997426e5/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestsrcfg06rocksdbt3local997426e5_default  Creating
+E                Network ubuntutestsrcfg06rocksdbt3local997426e5_default  Error
+E               failed to create network ubuntutestsrcfg06rocksdbt3local997426e5_default: Error response from daemon: all predefined address pools have been fully subnetted
+
+tests/integration/helpers/cluster.py:191: Exception</failure></testcase><testcase classname="tests.stress.keeper.tests.test_scenarios" name="test_scenario[CHA-02[default|t3]]" time="1.295"><failure message="Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-02[default|t3]-local-8a6cdeec/.env --project-name ubuntutestscha02defaultt3local8a6cdeec --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-02[default|t3]-local-8a6cdeec/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-02[default|t3]-local-8a6cdeec/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-02[default|t3]-local-8a6cdeec/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestscha02defaultt3local8a6cdeec_default  Creating&#10; Network ubuntutestscha02defaultt3local8a6cdeec_default  Error&#10;failed to create network ubuntutestscha02defaultt3local8a6cdeec_default: Error response from daemon: all predefined address pools have been fully subnetted">scenario = {'backend': 'default', 'faults': [{'kind': 'netem', True: 'all', 'delay_ms': 25, 'jitter_ms': 7, ...}], 'gates': [{'ty...: 'log_sanity_ok'}, {'type': 'health_precheck'}, {'max_ms': 10000, 'type': 'p99_le'}], 'id': 'CHA-02[default|t3]', ...}
+cluster_factory = &lt;function cluster_factory.&lt;locals&gt;._make at 0xe4851eedd440&gt;
+request = &lt;FixtureRequest for &lt;Function test_scenario[CHA-02[default|t3]]&gt;&gt;
+run_meta = {'backend': 'default', 'commit_sha': 'local'}
+
+    @pytest.mark.timeout(2400)
+    def test_scenario(scenario, cluster_factory, request, run_meta):
+        start_ts = time.time()
+        topo=scenario.get("topology",3)
+        flags=scenario.get("keeper_flags_xml","")
+        backend = scenario.get("backend") or request.config.getoption("--keeper-backend")
+        # Effective run_meta per test with the scenario-selected backend
+        run_meta_eff = dict(run_meta or {})
+        try:
+            run_meta_eff["backend"] = backend
+        except Exception:
+            pass
+        opts=scenario.get("opts", {})
+        try:
+            faults_mode = request.config.getoption("--faults")
+        except Exception:
+            faults_mode = os.environ.get("KEEPER_FAULTS", "on")
+        try:
+            rnd_count = int(request.config.getoption("--random-faults-count") or 1)
+        except Exception:
+            rnd_count = int(os.environ.get("KEEPER_RANDOM_FAULTS_COUNT", "1"))
+        try:
+            seed_val = int(request.config.getoption("--seed") or 0)
+        except Exception:
+            seed_val = 0
+        fs_original = scenario.get("faults", []) or []
+        fs_effective = fs_original
+        if faults_mode == "off":
+            fs_effective = []
+        elif faults_mode == "random":
+            try:
+                dur_default = int((scenario.get("workload") or {}).get("duration") or request.config.getoption("--duration"))
+            except Exception:
+                dur_default = int(os.environ.get("KEEPER_DURATION", "120"))
+            if seed_val &lt;= 0:
+                import os as _os
+                seed_val = int.from_bytes(_os.urandom(4), 'big')
+            try:
+                try:
+                    inc_raw = request.config.getoption("--random-faults-include") or os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                except Exception:
+                    inc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                try:
+                    exc_raw = request.config.getoption("--random-faults-exclude") or os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                except Exception:
+                    exc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                inc = set([x.strip() for x in (inc_raw or "").split(",") if x.strip()])
+                exc = set([x.strip() for x in (exc_raw or "").split(",") if x.strip()])
+                cands = [k for k in list(getattr(fault_registry, 'keys', lambda: [])()) if k not in _FUZZ_EXCLUDE]
+                if not cands and isinstance(fault_registry, dict):
+                    cands = [k for k in fault_registry.keys() if k not in _FUZZ_EXCLUDE]
+                weights = {}
+                if inc:
+                    for k in cands:
+                        weights[k] = 1 if k in inc else 0
+                else:
+                    for k in cands:
+                        weights[k] = 0 if k in exc else 1
+                fz = generate_fuzz_scenario(seed_val, max(1, rnd_count), dur_default, weights=weights)
+                rnd_faults = fz.get("faults", []) or []
+                rb = {"kind": "run_bench", "duration_s": dur_default}
+                fs_effective = [{"kind": "parallel", "steps": [rb] + rnd_faults}]
+            except Exception:
+                fs_effective = fs_original
+        try:
+            uses_dm = any((f.get("kind") in ("dm_delay","dm_error")) for f in fs_effective)
+            if uses_dm:
+                os.environ.setdefault("KEEPER_PRIVILEGED", "1")
+                os.environ.setdefault("KEEPER_HOST_AUTO_PROVISION", "1")
+            # Relax log gate for known transient errors during chaos if not provided by env
+            os.environ.setdefault(
+                "KEEPER_LOG_ALLOW",
+                "failed to read rpc header.*End of file|DNS error|Not found address of host|Net Exception: Socket is not connected|CANNOT_READ_ALL_DATA|Cannot read all data|Unknown table.*system\\.trace_log|Unknown table expression identifier 'system\\.trace_log'"
+            )
+        except Exception:
+            pass
+        # compute run_id early for reproducible artifact paths
+        run_id=f"{scenario.get('id','')}-{run_meta.get('commit_sha','local')}-{uuid.uuid4().hex[:8]}"
+        # Use a unique cluster name per test to avoid instance-dir collisions
+        try:
+            cname = run_id.replace('/', '_').replace(' ', '_')
+            os.environ["KEEPER_CLUSTER_NAME"] = cname
+        except Exception:
+            pass
+&gt;       cluster, nodes = cluster_factory(topo, backend, opts)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/stress/keeper/tests/test_scenarios.py:215: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/stress/keeper/tests/conftest.py:86: in _make
+    cluster, nodes = builder.build(topology=topology, backend=backend, opts=opts)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/core/cluster.py:200: in build
+    cluster.start()
+tests/integration/helpers/cluster.py:3728: in start
+    run_and_check(clickhouse_start_cmd)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ['docker', 'compose', '--env-file', '/home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-02[default|t3]-local-8a6cdeec/.env', '--project-name', 'ubuntutestscha02defaultt3local8a6cdeec', ...]
+env = None, shell = False, stdout = -1, stderr = -1, timeout = 300
+nothrow = False, detach = False
+
+    def run_and_check(
+        args: Union[Sequence[str], str],
+        env=None,
+        shell=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=300,
+        nothrow=False,
+        detach=False,
+    ) -&gt; str:
+        if shell:
+            if isinstance(args, str):
+                shell_args = args
+            else:
+                shell_args = next(a for a in args)
+        else:
+            shell_args = " ".join(args)
+    
+        logging.debug("Command:[%s]", shell_args)
+        if detach:
+            subprocess.Popen(
+                args,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                shell=shell,
+            )
+            return ""
+    
+        res = subprocess.run(
+            args,
+            stdout=stdout,
+            stderr=stderr,
+            env=env,
+            shell=shell,
+            timeout=timeout,
+            check=False,
+        )
+        out = res.stdout.decode("utf-8", "ignore")
+        err = res.stderr.decode("utf-8", "ignore")
+        # check_call(...) from subprocess does not print stderr, so we do it manually
+        for outline in out.splitlines():
+            logging.debug("Stdout:%s", outline)
+        for errline in err.splitlines():
+            logging.debug("Stderr:%s", errline)
+        if res.returncode != 0:
+            logging.debug("Exitcode:%s", res.returncode)
+            if env:
+                logging.debug("Env:%s", env)
+            if not nothrow:
+&gt;               raise Exception(
+                    f"Command [{shell_args}] return non-zero code {res.returncode}: {res.stderr.decode('utf-8')}"
+                )
+E               Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-02[default|t3]-local-8a6cdeec/.env --project-name ubuntutestscha02defaultt3local8a6cdeec --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-02[default|t3]-local-8a6cdeec/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-02[default|t3]-local-8a6cdeec/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-02[default|t3]-local-8a6cdeec/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestscha02defaultt3local8a6cdeec_default  Creating
+E                Network ubuntutestscha02defaultt3local8a6cdeec_default  Error
+E               failed to create network ubuntutestscha02defaultt3local8a6cdeec_default: Error response from daemon: all predefined address pools have been fully subnetted
+
+tests/integration/helpers/cluster.py:191: Exception</failure></testcase><testcase classname="tests.stress.keeper.tests.test_scenarios" name="test_scenario[CHA-02[rocksdb|t3]]" time="1.308"><failure message="Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-02[rocksdb|t3]-local-2cdc4af6/.env --project-name ubuntutestscha02rocksdbt3local2cdc4af6 --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-02[rocksdb|t3]-local-2cdc4af6/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-02[rocksdb|t3]-local-2cdc4af6/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-02[rocksdb|t3]-local-2cdc4af6/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestscha02rocksdbt3local2cdc4af6_default  Creating&#10; Network ubuntutestscha02rocksdbt3local2cdc4af6_default  Error&#10;failed to create network ubuntutestscha02rocksdbt3local2cdc4af6_default: Error response from daemon: all predefined address pools have been fully subnetted">scenario = {'backend': 'rocksdb', 'faults': [{'kind': 'netem', True: 'all', 'delay_ms': 25, 'jitter_ms': 7, ...}], 'gates': [{'ty...: 'log_sanity_ok'}, {'type': 'health_precheck'}, {'max_ms': 10000, 'type': 'p99_le'}], 'id': 'CHA-02[rocksdb|t3]', ...}
+cluster_factory = &lt;function cluster_factory.&lt;locals&gt;._make at 0xe4851eb30180&gt;
+request = &lt;FixtureRequest for &lt;Function test_scenario[CHA-02[rocksdb|t3]]&gt;&gt;
+run_meta = {'backend': 'default', 'commit_sha': 'local'}
+
+    @pytest.mark.timeout(2400)
+    def test_scenario(scenario, cluster_factory, request, run_meta):
+        start_ts = time.time()
+        topo=scenario.get("topology",3)
+        flags=scenario.get("keeper_flags_xml","")
+        backend = scenario.get("backend") or request.config.getoption("--keeper-backend")
+        # Effective run_meta per test with the scenario-selected backend
+        run_meta_eff = dict(run_meta or {})
+        try:
+            run_meta_eff["backend"] = backend
+        except Exception:
+            pass
+        opts=scenario.get("opts", {})
+        try:
+            faults_mode = request.config.getoption("--faults")
+        except Exception:
+            faults_mode = os.environ.get("KEEPER_FAULTS", "on")
+        try:
+            rnd_count = int(request.config.getoption("--random-faults-count") or 1)
+        except Exception:
+            rnd_count = int(os.environ.get("KEEPER_RANDOM_FAULTS_COUNT", "1"))
+        try:
+            seed_val = int(request.config.getoption("--seed") or 0)
+        except Exception:
+            seed_val = 0
+        fs_original = scenario.get("faults", []) or []
+        fs_effective = fs_original
+        if faults_mode == "off":
+            fs_effective = []
+        elif faults_mode == "random":
+            try:
+                dur_default = int((scenario.get("workload") or {}).get("duration") or request.config.getoption("--duration"))
+            except Exception:
+                dur_default = int(os.environ.get("KEEPER_DURATION", "120"))
+            if seed_val &lt;= 0:
+                import os as _os
+                seed_val = int.from_bytes(_os.urandom(4), 'big')
+            try:
+                try:
+                    inc_raw = request.config.getoption("--random-faults-include") or os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                except Exception:
+                    inc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                try:
+                    exc_raw = request.config.getoption("--random-faults-exclude") or os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                except Exception:
+                    exc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                inc = set([x.strip() for x in (inc_raw or "").split(",") if x.strip()])
+                exc = set([x.strip() for x in (exc_raw or "").split(",") if x.strip()])
+                cands = [k for k in list(getattr(fault_registry, 'keys', lambda: [])()) if k not in _FUZZ_EXCLUDE]
+                if not cands and isinstance(fault_registry, dict):
+                    cands = [k for k in fault_registry.keys() if k not in _FUZZ_EXCLUDE]
+                weights = {}
+                if inc:
+                    for k in cands:
+                        weights[k] = 1 if k in inc else 0
+                else:
+                    for k in cands:
+                        weights[k] = 0 if k in exc else 1
+                fz = generate_fuzz_scenario(seed_val, max(1, rnd_count), dur_default, weights=weights)
+                rnd_faults = fz.get("faults", []) or []
+                rb = {"kind": "run_bench", "duration_s": dur_default}
+                fs_effective = [{"kind": "parallel", "steps": [rb] + rnd_faults}]
+            except Exception:
+                fs_effective = fs_original
+        try:
+            uses_dm = any((f.get("kind") in ("dm_delay","dm_error")) for f in fs_effective)
+            if uses_dm:
+                os.environ.setdefault("KEEPER_PRIVILEGED", "1")
+                os.environ.setdefault("KEEPER_HOST_AUTO_PROVISION", "1")
+            # Relax log gate for known transient errors during chaos if not provided by env
+            os.environ.setdefault(
+                "KEEPER_LOG_ALLOW",
+                "failed to read rpc header.*End of file|DNS error|Not found address of host|Net Exception: Socket is not connected|CANNOT_READ_ALL_DATA|Cannot read all data|Unknown table.*system\\.trace_log|Unknown table expression identifier 'system\\.trace_log'"
+            )
+        except Exception:
+            pass
+        # compute run_id early for reproducible artifact paths
+        run_id=f"{scenario.get('id','')}-{run_meta.get('commit_sha','local')}-{uuid.uuid4().hex[:8]}"
+        # Use a unique cluster name per test to avoid instance-dir collisions
+        try:
+            cname = run_id.replace('/', '_').replace(' ', '_')
+            os.environ["KEEPER_CLUSTER_NAME"] = cname
+        except Exception:
+            pass
+&gt;       cluster, nodes = cluster_factory(topo, backend, opts)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/stress/keeper/tests/test_scenarios.py:215: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/stress/keeper/tests/conftest.py:86: in _make
+    cluster, nodes = builder.build(topology=topology, backend=backend, opts=opts)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/core/cluster.py:200: in build
+    cluster.start()
+tests/integration/helpers/cluster.py:3728: in start
+    run_and_check(clickhouse_start_cmd)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ['docker', 'compose', '--env-file', '/home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-02[rocksdb|t3]-local-2cdc4af6/.env', '--project-name', 'ubuntutestscha02rocksdbt3local2cdc4af6', ...]
+env = None, shell = False, stdout = -1, stderr = -1, timeout = 300
+nothrow = False, detach = False
+
+    def run_and_check(
+        args: Union[Sequence[str], str],
+        env=None,
+        shell=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=300,
+        nothrow=False,
+        detach=False,
+    ) -&gt; str:
+        if shell:
+            if isinstance(args, str):
+                shell_args = args
+            else:
+                shell_args = next(a for a in args)
+        else:
+            shell_args = " ".join(args)
+    
+        logging.debug("Command:[%s]", shell_args)
+        if detach:
+            subprocess.Popen(
+                args,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                shell=shell,
+            )
+            return ""
+    
+        res = subprocess.run(
+            args,
+            stdout=stdout,
+            stderr=stderr,
+            env=env,
+            shell=shell,
+            timeout=timeout,
+            check=False,
+        )
+        out = res.stdout.decode("utf-8", "ignore")
+        err = res.stderr.decode("utf-8", "ignore")
+        # check_call(...) from subprocess does not print stderr, so we do it manually
+        for outline in out.splitlines():
+            logging.debug("Stdout:%s", outline)
+        for errline in err.splitlines():
+            logging.debug("Stderr:%s", errline)
+        if res.returncode != 0:
+            logging.debug("Exitcode:%s", res.returncode)
+            if env:
+                logging.debug("Env:%s", env)
+            if not nothrow:
+&gt;               raise Exception(
+                    f"Command [{shell_args}] return non-zero code {res.returncode}: {res.stderr.decode('utf-8')}"
+                )
+E               Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-02[rocksdb|t3]-local-2cdc4af6/.env --project-name ubuntutestscha02rocksdbt3local2cdc4af6 --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-02[rocksdb|t3]-local-2cdc4af6/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-02[rocksdb|t3]-local-2cdc4af6/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-02[rocksdb|t3]-local-2cdc4af6/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestscha02rocksdbt3local2cdc4af6_default  Creating
+E                Network ubuntutestscha02rocksdbt3local2cdc4af6_default  Error
+E               failed to create network ubuntutestscha02rocksdbt3local2cdc4af6_default: Error response from daemon: all predefined address pools have been fully subnetted
+
+tests/integration/helpers/cluster.py:191: Exception</failure></testcase><testcase classname="tests.stress.keeper.tests.test_scenarios" name="test_scenario[CHA-03[default|t3]]" time="1.306"><failure message="Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-03[default|t3]-local-a506b4c5/.env --project-name ubuntutestscha03defaultt3locala506b4c5 --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-03[default|t3]-local-a506b4c5/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-03[default|t3]-local-a506b4c5/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-03[default|t3]-local-a506b4c5/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestscha03defaultt3locala506b4c5_default  Creating&#10; Network ubuntutestscha03defaultt3locala506b4c5_default  Error&#10;failed to create network ubuntutestscha03defaultt3locala506b4c5_default: Error response from daemon: all predefined address pools have been fully subnetted">scenario = {'backend': 'default', 'faults': [{'kind': 'netem', True: 'all', 'delay_ms': 20, 'jitter_ms': 15, ...}], 'gates': [{'t...ms': 3000, 'type': 'p95_le'}, {'type': 'log_sanity_ok'}, {'type': 'health_precheck'}], 'id': 'CHA-03[default|t3]', ...}
+cluster_factory = &lt;function cluster_factory.&lt;locals&gt;._make at 0xe4851eb32520&gt;
+request = &lt;FixtureRequest for &lt;Function test_scenario[CHA-03[default|t3]]&gt;&gt;
+run_meta = {'backend': 'default', 'commit_sha': 'local'}
+
+    @pytest.mark.timeout(2400)
+    def test_scenario(scenario, cluster_factory, request, run_meta):
+        start_ts = time.time()
+        topo=scenario.get("topology",3)
+        flags=scenario.get("keeper_flags_xml","")
+        backend = scenario.get("backend") or request.config.getoption("--keeper-backend")
+        # Effective run_meta per test with the scenario-selected backend
+        run_meta_eff = dict(run_meta or {})
+        try:
+            run_meta_eff["backend"] = backend
+        except Exception:
+            pass
+        opts=scenario.get("opts", {})
+        try:
+            faults_mode = request.config.getoption("--faults")
+        except Exception:
+            faults_mode = os.environ.get("KEEPER_FAULTS", "on")
+        try:
+            rnd_count = int(request.config.getoption("--random-faults-count") or 1)
+        except Exception:
+            rnd_count = int(os.environ.get("KEEPER_RANDOM_FAULTS_COUNT", "1"))
+        try:
+            seed_val = int(request.config.getoption("--seed") or 0)
+        except Exception:
+            seed_val = 0
+        fs_original = scenario.get("faults", []) or []
+        fs_effective = fs_original
+        if faults_mode == "off":
+            fs_effective = []
+        elif faults_mode == "random":
+            try:
+                dur_default = int((scenario.get("workload") or {}).get("duration") or request.config.getoption("--duration"))
+            except Exception:
+                dur_default = int(os.environ.get("KEEPER_DURATION", "120"))
+            if seed_val &lt;= 0:
+                import os as _os
+                seed_val = int.from_bytes(_os.urandom(4), 'big')
+            try:
+                try:
+                    inc_raw = request.config.getoption("--random-faults-include") or os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                except Exception:
+                    inc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                try:
+                    exc_raw = request.config.getoption("--random-faults-exclude") or os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                except Exception:
+                    exc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                inc = set([x.strip() for x in (inc_raw or "").split(",") if x.strip()])
+                exc = set([x.strip() for x in (exc_raw or "").split(",") if x.strip()])
+                cands = [k for k in list(getattr(fault_registry, 'keys', lambda: [])()) if k not in _FUZZ_EXCLUDE]
+                if not cands and isinstance(fault_registry, dict):
+                    cands = [k for k in fault_registry.keys() if k not in _FUZZ_EXCLUDE]
+                weights = {}
+                if inc:
+                    for k in cands:
+                        weights[k] = 1 if k in inc else 0
+                else:
+                    for k in cands:
+                        weights[k] = 0 if k in exc else 1
+                fz = generate_fuzz_scenario(seed_val, max(1, rnd_count), dur_default, weights=weights)
+                rnd_faults = fz.get("faults", []) or []
+                rb = {"kind": "run_bench", "duration_s": dur_default}
+                fs_effective = [{"kind": "parallel", "steps": [rb] + rnd_faults}]
+            except Exception:
+                fs_effective = fs_original
+        try:
+            uses_dm = any((f.get("kind") in ("dm_delay","dm_error")) for f in fs_effective)
+            if uses_dm:
+                os.environ.setdefault("KEEPER_PRIVILEGED", "1")
+                os.environ.setdefault("KEEPER_HOST_AUTO_PROVISION", "1")
+            # Relax log gate for known transient errors during chaos if not provided by env
+            os.environ.setdefault(
+                "KEEPER_LOG_ALLOW",
+                "failed to read rpc header.*End of file|DNS error|Not found address of host|Net Exception: Socket is not connected|CANNOT_READ_ALL_DATA|Cannot read all data|Unknown table.*system\\.trace_log|Unknown table expression identifier 'system\\.trace_log'"
+            )
+        except Exception:
+            pass
+        # compute run_id early for reproducible artifact paths
+        run_id=f"{scenario.get('id','')}-{run_meta.get('commit_sha','local')}-{uuid.uuid4().hex[:8]}"
+        # Use a unique cluster name per test to avoid instance-dir collisions
+        try:
+            cname = run_id.replace('/', '_').replace(' ', '_')
+            os.environ["KEEPER_CLUSTER_NAME"] = cname
+        except Exception:
+            pass
+&gt;       cluster, nodes = cluster_factory(topo, backend, opts)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/stress/keeper/tests/test_scenarios.py:215: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/stress/keeper/tests/conftest.py:86: in _make
+    cluster, nodes = builder.build(topology=topology, backend=backend, opts=opts)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/core/cluster.py:200: in build
+    cluster.start()
+tests/integration/helpers/cluster.py:3728: in start
+    run_and_check(clickhouse_start_cmd)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ['docker', 'compose', '--env-file', '/home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-03[default|t3]-local-a506b4c5/.env', '--project-name', 'ubuntutestscha03defaultt3locala506b4c5', ...]
+env = None, shell = False, stdout = -1, stderr = -1, timeout = 300
+nothrow = False, detach = False
+
+    def run_and_check(
+        args: Union[Sequence[str], str],
+        env=None,
+        shell=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=300,
+        nothrow=False,
+        detach=False,
+    ) -&gt; str:
+        if shell:
+            if isinstance(args, str):
+                shell_args = args
+            else:
+                shell_args = next(a for a in args)
+        else:
+            shell_args = " ".join(args)
+    
+        logging.debug("Command:[%s]", shell_args)
+        if detach:
+            subprocess.Popen(
+                args,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                shell=shell,
+            )
+            return ""
+    
+        res = subprocess.run(
+            args,
+            stdout=stdout,
+            stderr=stderr,
+            env=env,
+            shell=shell,
+            timeout=timeout,
+            check=False,
+        )
+        out = res.stdout.decode("utf-8", "ignore")
+        err = res.stderr.decode("utf-8", "ignore")
+        # check_call(...) from subprocess does not print stderr, so we do it manually
+        for outline in out.splitlines():
+            logging.debug("Stdout:%s", outline)
+        for errline in err.splitlines():
+            logging.debug("Stderr:%s", errline)
+        if res.returncode != 0:
+            logging.debug("Exitcode:%s", res.returncode)
+            if env:
+                logging.debug("Env:%s", env)
+            if not nothrow:
+&gt;               raise Exception(
+                    f"Command [{shell_args}] return non-zero code {res.returncode}: {res.stderr.decode('utf-8')}"
+                )
+E               Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-03[default|t3]-local-a506b4c5/.env --project-name ubuntutestscha03defaultt3locala506b4c5 --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-03[default|t3]-local-a506b4c5/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-03[default|t3]-local-a506b4c5/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-03[default|t3]-local-a506b4c5/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestscha03defaultt3locala506b4c5_default  Creating
+E                Network ubuntutestscha03defaultt3locala506b4c5_default  Error
+E               failed to create network ubuntutestscha03defaultt3locala506b4c5_default: Error response from daemon: all predefined address pools have been fully subnetted
+
+tests/integration/helpers/cluster.py:191: Exception</failure></testcase><testcase classname="tests.stress.keeper.tests.test_scenarios" name="test_scenario[CHA-03[rocksdb|t3]]" time="1.250"><failure message="Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-03[rocksdb|t3]-local-2d5e1c17/.env --project-name ubuntutestscha03rocksdbt3local2d5e1c17 --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-03[rocksdb|t3]-local-2d5e1c17/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-03[rocksdb|t3]-local-2d5e1c17/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-03[rocksdb|t3]-local-2d5e1c17/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestscha03rocksdbt3local2d5e1c17_default  Creating&#10; Network ubuntutestscha03rocksdbt3local2d5e1c17_default  Error&#10;failed to create network ubuntutestscha03rocksdbt3local2d5e1c17_default: Error response from daemon: all predefined address pools have been fully subnetted">scenario = {'backend': 'rocksdb', 'faults': [{'kind': 'netem', True: 'all', 'delay_ms': 20, 'jitter_ms': 15, ...}], 'gates': [{'t...ms': 3000, 'type': 'p95_le'}, {'type': 'log_sanity_ok'}, {'type': 'health_precheck'}], 'id': 'CHA-03[rocksdb|t3]', ...}
+cluster_factory = &lt;function cluster_factory.&lt;locals&gt;._make at 0xe4851eb37b00&gt;
+request = &lt;FixtureRequest for &lt;Function test_scenario[CHA-03[rocksdb|t3]]&gt;&gt;
+run_meta = {'backend': 'default', 'commit_sha': 'local'}
+
+    @pytest.mark.timeout(2400)
+    def test_scenario(scenario, cluster_factory, request, run_meta):
+        start_ts = time.time()
+        topo=scenario.get("topology",3)
+        flags=scenario.get("keeper_flags_xml","")
+        backend = scenario.get("backend") or request.config.getoption("--keeper-backend")
+        # Effective run_meta per test with the scenario-selected backend
+        run_meta_eff = dict(run_meta or {})
+        try:
+            run_meta_eff["backend"] = backend
+        except Exception:
+            pass
+        opts=scenario.get("opts", {})
+        try:
+            faults_mode = request.config.getoption("--faults")
+        except Exception:
+            faults_mode = os.environ.get("KEEPER_FAULTS", "on")
+        try:
+            rnd_count = int(request.config.getoption("--random-faults-count") or 1)
+        except Exception:
+            rnd_count = int(os.environ.get("KEEPER_RANDOM_FAULTS_COUNT", "1"))
+        try:
+            seed_val = int(request.config.getoption("--seed") or 0)
+        except Exception:
+            seed_val = 0
+        fs_original = scenario.get("faults", []) or []
+        fs_effective = fs_original
+        if faults_mode == "off":
+            fs_effective = []
+        elif faults_mode == "random":
+            try:
+                dur_default = int((scenario.get("workload") or {}).get("duration") or request.config.getoption("--duration"))
+            except Exception:
+                dur_default = int(os.environ.get("KEEPER_DURATION", "120"))
+            if seed_val &lt;= 0:
+                import os as _os
+                seed_val = int.from_bytes(_os.urandom(4), 'big')
+            try:
+                try:
+                    inc_raw = request.config.getoption("--random-faults-include") or os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                except Exception:
+                    inc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                try:
+                    exc_raw = request.config.getoption("--random-faults-exclude") or os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                except Exception:
+                    exc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                inc = set([x.strip() for x in (inc_raw or "").split(",") if x.strip()])
+                exc = set([x.strip() for x in (exc_raw or "").split(",") if x.strip()])
+                cands = [k for k in list(getattr(fault_registry, 'keys', lambda: [])()) if k not in _FUZZ_EXCLUDE]
+                if not cands and isinstance(fault_registry, dict):
+                    cands = [k for k in fault_registry.keys() if k not in _FUZZ_EXCLUDE]
+                weights = {}
+                if inc:
+                    for k in cands:
+                        weights[k] = 1 if k in inc else 0
+                else:
+                    for k in cands:
+                        weights[k] = 0 if k in exc else 1
+                fz = generate_fuzz_scenario(seed_val, max(1, rnd_count), dur_default, weights=weights)
+                rnd_faults = fz.get("faults", []) or []
+                rb = {"kind": "run_bench", "duration_s": dur_default}
+                fs_effective = [{"kind": "parallel", "steps": [rb] + rnd_faults}]
+            except Exception:
+                fs_effective = fs_original
+        try:
+            uses_dm = any((f.get("kind") in ("dm_delay","dm_error")) for f in fs_effective)
+            if uses_dm:
+                os.environ.setdefault("KEEPER_PRIVILEGED", "1")
+                os.environ.setdefault("KEEPER_HOST_AUTO_PROVISION", "1")
+            # Relax log gate for known transient errors during chaos if not provided by env
+            os.environ.setdefault(
+                "KEEPER_LOG_ALLOW",
+                "failed to read rpc header.*End of file|DNS error|Not found address of host|Net Exception: Socket is not connected|CANNOT_READ_ALL_DATA|Cannot read all data|Unknown table.*system\\.trace_log|Unknown table expression identifier 'system\\.trace_log'"
+            )
+        except Exception:
+            pass
+        # compute run_id early for reproducible artifact paths
+        run_id=f"{scenario.get('id','')}-{run_meta.get('commit_sha','local')}-{uuid.uuid4().hex[:8]}"
+        # Use a unique cluster name per test to avoid instance-dir collisions
+        try:
+            cname = run_id.replace('/', '_').replace(' ', '_')
+            os.environ["KEEPER_CLUSTER_NAME"] = cname
+        except Exception:
+            pass
+&gt;       cluster, nodes = cluster_factory(topo, backend, opts)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/stress/keeper/tests/test_scenarios.py:215: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/stress/keeper/tests/conftest.py:86: in _make
+    cluster, nodes = builder.build(topology=topology, backend=backend, opts=opts)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/core/cluster.py:200: in build
+    cluster.start()
+tests/integration/helpers/cluster.py:3728: in start
+    run_and_check(clickhouse_start_cmd)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ['docker', 'compose', '--env-file', '/home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-03[rocksdb|t3]-local-2d5e1c17/.env', '--project-name', 'ubuntutestscha03rocksdbt3local2d5e1c17', ...]
+env = None, shell = False, stdout = -1, stderr = -1, timeout = 300
+nothrow = False, detach = False
+
+    def run_and_check(
+        args: Union[Sequence[str], str],
+        env=None,
+        shell=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=300,
+        nothrow=False,
+        detach=False,
+    ) -&gt; str:
+        if shell:
+            if isinstance(args, str):
+                shell_args = args
+            else:
+                shell_args = next(a for a in args)
+        else:
+            shell_args = " ".join(args)
+    
+        logging.debug("Command:[%s]", shell_args)
+        if detach:
+            subprocess.Popen(
+                args,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                shell=shell,
+            )
+            return ""
+    
+        res = subprocess.run(
+            args,
+            stdout=stdout,
+            stderr=stderr,
+            env=env,
+            shell=shell,
+            timeout=timeout,
+            check=False,
+        )
+        out = res.stdout.decode("utf-8", "ignore")
+        err = res.stderr.decode("utf-8", "ignore")
+        # check_call(...) from subprocess does not print stderr, so we do it manually
+        for outline in out.splitlines():
+            logging.debug("Stdout:%s", outline)
+        for errline in err.splitlines():
+            logging.debug("Stderr:%s", errline)
+        if res.returncode != 0:
+            logging.debug("Exitcode:%s", res.returncode)
+            if env:
+                logging.debug("Env:%s", env)
+            if not nothrow:
+&gt;               raise Exception(
+                    f"Command [{shell_args}] return non-zero code {res.returncode}: {res.stderr.decode('utf-8')}"
+                )
+E               Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-03[rocksdb|t3]-local-2d5e1c17/.env --project-name ubuntutestscha03rocksdbt3local2d5e1c17 --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-03[rocksdb|t3]-local-2d5e1c17/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-03[rocksdb|t3]-local-2d5e1c17/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-03[rocksdb|t3]-local-2d5e1c17/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestscha03rocksdbt3local2d5e1c17_default  Creating
+E                Network ubuntutestscha03rocksdbt3local2d5e1c17_default  Error
+E               failed to create network ubuntutestscha03rocksdbt3local2d5e1c17_default: Error response from daemon: all predefined address pools have been fully subnetted
+
+tests/integration/helpers/cluster.py:191: Exception</failure></testcase><testcase classname="tests.stress.keeper.tests.test_scenarios" name="test_scenario[CHA-04[default|t3]]" time="1.296"><failure message="Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-04[default|t3]-local-7ecb3d55/.env --project-name ubuntutestscha04defaultt3local7ecb3d55 --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-04[default|t3]-local-7ecb3d55/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-04[default|t3]-local-7ecb3d55/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-04[default|t3]-local-7ecb3d55/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestscha04defaultt3local7ecb3d55_default  Creating&#10; Network ubuntutestscha04defaultt3local7ecb3d55_default  Error&#10;failed to create network ubuntutestscha04defaultt3local7ecb3d55_default: Error response from daemon: all predefined address pools have been fully subnetted">scenario = {'backend': 'default', 'faults': [{'kind': 'netem', True: 'all', 'loss_pct': 2, 'jitter_ms': 5, ...}], 'gates': [{'typ...ms': 4000, 'type': 'p95_le'}, {'type': 'log_sanity_ok'}, {'type': 'health_precheck'}], 'id': 'CHA-04[default|t3]', ...}
+cluster_factory = &lt;function cluster_factory.&lt;locals&gt;._make at 0xe4851ed7a980&gt;
+request = &lt;FixtureRequest for &lt;Function test_scenario[CHA-04[default|t3]]&gt;&gt;
+run_meta = {'backend': 'default', 'commit_sha': 'local'}
+
+    @pytest.mark.timeout(2400)
+    def test_scenario(scenario, cluster_factory, request, run_meta):
+        start_ts = time.time()
+        topo=scenario.get("topology",3)
+        flags=scenario.get("keeper_flags_xml","")
+        backend = scenario.get("backend") or request.config.getoption("--keeper-backend")
+        # Effective run_meta per test with the scenario-selected backend
+        run_meta_eff = dict(run_meta or {})
+        try:
+            run_meta_eff["backend"] = backend
+        except Exception:
+            pass
+        opts=scenario.get("opts", {})
+        try:
+            faults_mode = request.config.getoption("--faults")
+        except Exception:
+            faults_mode = os.environ.get("KEEPER_FAULTS", "on")
+        try:
+            rnd_count = int(request.config.getoption("--random-faults-count") or 1)
+        except Exception:
+            rnd_count = int(os.environ.get("KEEPER_RANDOM_FAULTS_COUNT", "1"))
+        try:
+            seed_val = int(request.config.getoption("--seed") or 0)
+        except Exception:
+            seed_val = 0
+        fs_original = scenario.get("faults", []) or []
+        fs_effective = fs_original
+        if faults_mode == "off":
+            fs_effective = []
+        elif faults_mode == "random":
+            try:
+                dur_default = int((scenario.get("workload") or {}).get("duration") or request.config.getoption("--duration"))
+            except Exception:
+                dur_default = int(os.environ.get("KEEPER_DURATION", "120"))
+            if seed_val &lt;= 0:
+                import os as _os
+                seed_val = int.from_bytes(_os.urandom(4), 'big')
+            try:
+                try:
+                    inc_raw = request.config.getoption("--random-faults-include") or os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                except Exception:
+                    inc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                try:
+                    exc_raw = request.config.getoption("--random-faults-exclude") or os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                except Exception:
+                    exc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                inc = set([x.strip() for x in (inc_raw or "").split(",") if x.strip()])
+                exc = set([x.strip() for x in (exc_raw or "").split(",") if x.strip()])
+                cands = [k for k in list(getattr(fault_registry, 'keys', lambda: [])()) if k not in _FUZZ_EXCLUDE]
+                if not cands and isinstance(fault_registry, dict):
+                    cands = [k for k in fault_registry.keys() if k not in _FUZZ_EXCLUDE]
+                weights = {}
+                if inc:
+                    for k in cands:
+                        weights[k] = 1 if k in inc else 0
+                else:
+                    for k in cands:
+                        weights[k] = 0 if k in exc else 1
+                fz = generate_fuzz_scenario(seed_val, max(1, rnd_count), dur_default, weights=weights)
+                rnd_faults = fz.get("faults", []) or []
+                rb = {"kind": "run_bench", "duration_s": dur_default}
+                fs_effective = [{"kind": "parallel", "steps": [rb] + rnd_faults}]
+            except Exception:
+                fs_effective = fs_original
+        try:
+            uses_dm = any((f.get("kind") in ("dm_delay","dm_error")) for f in fs_effective)
+            if uses_dm:
+                os.environ.setdefault("KEEPER_PRIVILEGED", "1")
+                os.environ.setdefault("KEEPER_HOST_AUTO_PROVISION", "1")
+            # Relax log gate for known transient errors during chaos if not provided by env
+            os.environ.setdefault(
+                "KEEPER_LOG_ALLOW",
+                "failed to read rpc header.*End of file|DNS error|Not found address of host|Net Exception: Socket is not connected|CANNOT_READ_ALL_DATA|Cannot read all data|Unknown table.*system\\.trace_log|Unknown table expression identifier 'system\\.trace_log'"
+            )
+        except Exception:
+            pass
+        # compute run_id early for reproducible artifact paths
+        run_id=f"{scenario.get('id','')}-{run_meta.get('commit_sha','local')}-{uuid.uuid4().hex[:8]}"
+        # Use a unique cluster name per test to avoid instance-dir collisions
+        try:
+            cname = run_id.replace('/', '_').replace(' ', '_')
+            os.environ["KEEPER_CLUSTER_NAME"] = cname
+        except Exception:
+            pass
+&gt;       cluster, nodes = cluster_factory(topo, backend, opts)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/stress/keeper/tests/test_scenarios.py:215: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/stress/keeper/tests/conftest.py:86: in _make
+    cluster, nodes = builder.build(topology=topology, backend=backend, opts=opts)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/core/cluster.py:200: in build
+    cluster.start()
+tests/integration/helpers/cluster.py:3728: in start
+    run_and_check(clickhouse_start_cmd)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ['docker', 'compose', '--env-file', '/home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-04[default|t3]-local-7ecb3d55/.env', '--project-name', 'ubuntutestscha04defaultt3local7ecb3d55', ...]
+env = None, shell = False, stdout = -1, stderr = -1, timeout = 300
+nothrow = False, detach = False
+
+    def run_and_check(
+        args: Union[Sequence[str], str],
+        env=None,
+        shell=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=300,
+        nothrow=False,
+        detach=False,
+    ) -&gt; str:
+        if shell:
+            if isinstance(args, str):
+                shell_args = args
+            else:
+                shell_args = next(a for a in args)
+        else:
+            shell_args = " ".join(args)
+    
+        logging.debug("Command:[%s]", shell_args)
+        if detach:
+            subprocess.Popen(
+                args,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                shell=shell,
+            )
+            return ""
+    
+        res = subprocess.run(
+            args,
+            stdout=stdout,
+            stderr=stderr,
+            env=env,
+            shell=shell,
+            timeout=timeout,
+            check=False,
+        )
+        out = res.stdout.decode("utf-8", "ignore")
+        err = res.stderr.decode("utf-8", "ignore")
+        # check_call(...) from subprocess does not print stderr, so we do it manually
+        for outline in out.splitlines():
+            logging.debug("Stdout:%s", outline)
+        for errline in err.splitlines():
+            logging.debug("Stderr:%s", errline)
+        if res.returncode != 0:
+            logging.debug("Exitcode:%s", res.returncode)
+            if env:
+                logging.debug("Env:%s", env)
+            if not nothrow:
+&gt;               raise Exception(
+                    f"Command [{shell_args}] return non-zero code {res.returncode}: {res.stderr.decode('utf-8')}"
+                )
+E               Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-04[default|t3]-local-7ecb3d55/.env --project-name ubuntutestscha04defaultt3local7ecb3d55 --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-04[default|t3]-local-7ecb3d55/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-04[default|t3]-local-7ecb3d55/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-04[default|t3]-local-7ecb3d55/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestscha04defaultt3local7ecb3d55_default  Creating
+E                Network ubuntutestscha04defaultt3local7ecb3d55_default  Error
+E               failed to create network ubuntutestscha04defaultt3local7ecb3d55_default: Error response from daemon: all predefined address pools have been fully subnetted
+
+tests/integration/helpers/cluster.py:191: Exception</failure></testcase><testcase classname="tests.stress.keeper.tests.test_scenarios" name="test_scenario[CHA-04[rocksdb|t3]]" time="1.256"><failure message="Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-04[rocksdb|t3]-local-cb4b768f/.env --project-name ubuntutestscha04rocksdbt3localcb4b768f --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-04[rocksdb|t3]-local-cb4b768f/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-04[rocksdb|t3]-local-cb4b768f/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-04[rocksdb|t3]-local-cb4b768f/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestscha04rocksdbt3localcb4b768f_default  Creating&#10; Network ubuntutestscha04rocksdbt3localcb4b768f_default  Error&#10;failed to create network ubuntutestscha04rocksdbt3localcb4b768f_default: Error response from daemon: all predefined address pools have been fully subnetted">scenario = {'backend': 'rocksdb', 'faults': [{'kind': 'netem', True: 'all', 'loss_pct': 2, 'jitter_ms': 5, ...}], 'gates': [{'typ...ms': 4000, 'type': 'p95_le'}, {'type': 'log_sanity_ok'}, {'type': 'health_precheck'}], 'id': 'CHA-04[rocksdb|t3]', ...}
+cluster_factory = &lt;function cluster_factory.&lt;locals&gt;._make at 0xe4851ed7a520&gt;
+request = &lt;FixtureRequest for &lt;Function test_scenario[CHA-04[rocksdb|t3]]&gt;&gt;
+run_meta = {'backend': 'default', 'commit_sha': 'local'}
+
+    @pytest.mark.timeout(2400)
+    def test_scenario(scenario, cluster_factory, request, run_meta):
+        start_ts = time.time()
+        topo=scenario.get("topology",3)
+        flags=scenario.get("keeper_flags_xml","")
+        backend = scenario.get("backend") or request.config.getoption("--keeper-backend")
+        # Effective run_meta per test with the scenario-selected backend
+        run_meta_eff = dict(run_meta or {})
+        try:
+            run_meta_eff["backend"] = backend
+        except Exception:
+            pass
+        opts=scenario.get("opts", {})
+        try:
+            faults_mode = request.config.getoption("--faults")
+        except Exception:
+            faults_mode = os.environ.get("KEEPER_FAULTS", "on")
+        try:
+            rnd_count = int(request.config.getoption("--random-faults-count") or 1)
+        except Exception:
+            rnd_count = int(os.environ.get("KEEPER_RANDOM_FAULTS_COUNT", "1"))
+        try:
+            seed_val = int(request.config.getoption("--seed") or 0)
+        except Exception:
+            seed_val = 0
+        fs_original = scenario.get("faults", []) or []
+        fs_effective = fs_original
+        if faults_mode == "off":
+            fs_effective = []
+        elif faults_mode == "random":
+            try:
+                dur_default = int((scenario.get("workload") or {}).get("duration") or request.config.getoption("--duration"))
+            except Exception:
+                dur_default = int(os.environ.get("KEEPER_DURATION", "120"))
+            if seed_val &lt;= 0:
+                import os as _os
+                seed_val = int.from_bytes(_os.urandom(4), 'big')
+            try:
+                try:
+                    inc_raw = request.config.getoption("--random-faults-include") or os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                except Exception:
+                    inc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                try:
+                    exc_raw = request.config.getoption("--random-faults-exclude") or os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                except Exception:
+                    exc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                inc = set([x.strip() for x in (inc_raw or "").split(",") if x.strip()])
+                exc = set([x.strip() for x in (exc_raw or "").split(",") if x.strip()])
+                cands = [k for k in list(getattr(fault_registry, 'keys', lambda: [])()) if k not in _FUZZ_EXCLUDE]
+                if not cands and isinstance(fault_registry, dict):
+                    cands = [k for k in fault_registry.keys() if k not in _FUZZ_EXCLUDE]
+                weights = {}
+                if inc:
+                    for k in cands:
+                        weights[k] = 1 if k in inc else 0
+                else:
+                    for k in cands:
+                        weights[k] = 0 if k in exc else 1
+                fz = generate_fuzz_scenario(seed_val, max(1, rnd_count), dur_default, weights=weights)
+                rnd_faults = fz.get("faults", []) or []
+                rb = {"kind": "run_bench", "duration_s": dur_default}
+                fs_effective = [{"kind": "parallel", "steps": [rb] + rnd_faults}]
+            except Exception:
+                fs_effective = fs_original
+        try:
+            uses_dm = any((f.get("kind") in ("dm_delay","dm_error")) for f in fs_effective)
+            if uses_dm:
+                os.environ.setdefault("KEEPER_PRIVILEGED", "1")
+                os.environ.setdefault("KEEPER_HOST_AUTO_PROVISION", "1")
+            # Relax log gate for known transient errors during chaos if not provided by env
+            os.environ.setdefault(
+                "KEEPER_LOG_ALLOW",
+                "failed to read rpc header.*End of file|DNS error|Not found address of host|Net Exception: Socket is not connected|CANNOT_READ_ALL_DATA|Cannot read all data|Unknown table.*system\\.trace_log|Unknown table expression identifier 'system\\.trace_log'"
+            )
+        except Exception:
+            pass
+        # compute run_id early for reproducible artifact paths
+        run_id=f"{scenario.get('id','')}-{run_meta.get('commit_sha','local')}-{uuid.uuid4().hex[:8]}"
+        # Use a unique cluster name per test to avoid instance-dir collisions
+        try:
+            cname = run_id.replace('/', '_').replace(' ', '_')
+            os.environ["KEEPER_CLUSTER_NAME"] = cname
+        except Exception:
+            pass
+&gt;       cluster, nodes = cluster_factory(topo, backend, opts)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/stress/keeper/tests/test_scenarios.py:215: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/stress/keeper/tests/conftest.py:86: in _make
+    cluster, nodes = builder.build(topology=topology, backend=backend, opts=opts)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/core/cluster.py:200: in build
+    cluster.start()
+tests/integration/helpers/cluster.py:3728: in start
+    run_and_check(clickhouse_start_cmd)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ['docker', 'compose', '--env-file', '/home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-04[rocksdb|t3]-local-cb4b768f/.env', '--project-name', 'ubuntutestscha04rocksdbt3localcb4b768f', ...]
+env = None, shell = False, stdout = -1, stderr = -1, timeout = 300
+nothrow = False, detach = False
+
+    def run_and_check(
+        args: Union[Sequence[str], str],
+        env=None,
+        shell=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=300,
+        nothrow=False,
+        detach=False,
+    ) -&gt; str:
+        if shell:
+            if isinstance(args, str):
+                shell_args = args
+            else:
+                shell_args = next(a for a in args)
+        else:
+            shell_args = " ".join(args)
+    
+        logging.debug("Command:[%s]", shell_args)
+        if detach:
+            subprocess.Popen(
+                args,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                shell=shell,
+            )
+            return ""
+    
+        res = subprocess.run(
+            args,
+            stdout=stdout,
+            stderr=stderr,
+            env=env,
+            shell=shell,
+            timeout=timeout,
+            check=False,
+        )
+        out = res.stdout.decode("utf-8", "ignore")
+        err = res.stderr.decode("utf-8", "ignore")
+        # check_call(...) from subprocess does not print stderr, so we do it manually
+        for outline in out.splitlines():
+            logging.debug("Stdout:%s", outline)
+        for errline in err.splitlines():
+            logging.debug("Stderr:%s", errline)
+        if res.returncode != 0:
+            logging.debug("Exitcode:%s", res.returncode)
+            if env:
+                logging.debug("Env:%s", env)
+            if not nothrow:
+&gt;               raise Exception(
+                    f"Command [{shell_args}] return non-zero code {res.returncode}: {res.stderr.decode('utf-8')}"
+                )
+E               Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-04[rocksdb|t3]-local-cb4b768f/.env --project-name ubuntutestscha04rocksdbt3localcb4b768f --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-04[rocksdb|t3]-local-cb4b768f/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-04[rocksdb|t3]-local-cb4b768f/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-04[rocksdb|t3]-local-cb4b768f/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestscha04rocksdbt3localcb4b768f_default  Creating
+E                Network ubuntutestscha04rocksdbt3localcb4b768f_default  Error
+E               failed to create network ubuntutestscha04rocksdbt3localcb4b768f_default: Error response from daemon: all predefined address pools have been fully subnetted
+
+tests/integration/helpers/cluster.py:191: Exception</failure></testcase><testcase classname="tests.stress.keeper.tests.test_scenarios" name="test_scenario[CHA-05[default|t3]]" time="1.290"><failure message="Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-05[default|t3]-local-cbb0e71b/.env --project-name ubuntutestscha05defaultt3localcbb0e71b --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-05[default|t3]-local-cbb0e71b/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-05[default|t3]-local-cbb0e71b/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-05[default|t3]-local-cbb0e71b/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestscha05defaultt3localcbb0e71b_default  Creating&#10; Network ubuntutestscha05defaultt3localcbb0e71b_default  Error&#10;failed to create network ubuntutestscha05defaultt3localcbb0e71b_default: Error response from daemon: all predefined address pools have been fully subnetted">scenario = {'backend': 'default', 'faults': [{'kind': 'stop_cont', True: ['keeper2'], 'count': 1, 'sleep_s': 2.0}, {'kind': 'stop...ms': 6000, 'type': 'p99_le'}, {'type': 'log_sanity_ok'}, {'type': 'health_precheck'}], 'id': 'CHA-05[default|t3]', ...}
+cluster_factory = &lt;function cluster_factory.&lt;locals&gt;._make at 0xe4851eb30900&gt;
+request = &lt;FixtureRequest for &lt;Function test_scenario[CHA-05[default|t3]]&gt;&gt;
+run_meta = {'backend': 'default', 'commit_sha': 'local'}
+
+    @pytest.mark.timeout(2400)
+    def test_scenario(scenario, cluster_factory, request, run_meta):
+        start_ts = time.time()
+        topo=scenario.get("topology",3)
+        flags=scenario.get("keeper_flags_xml","")
+        backend = scenario.get("backend") or request.config.getoption("--keeper-backend")
+        # Effective run_meta per test with the scenario-selected backend
+        run_meta_eff = dict(run_meta or {})
+        try:
+            run_meta_eff["backend"] = backend
+        except Exception:
+            pass
+        opts=scenario.get("opts", {})
+        try:
+            faults_mode = request.config.getoption("--faults")
+        except Exception:
+            faults_mode = os.environ.get("KEEPER_FAULTS", "on")
+        try:
+            rnd_count = int(request.config.getoption("--random-faults-count") or 1)
+        except Exception:
+            rnd_count = int(os.environ.get("KEEPER_RANDOM_FAULTS_COUNT", "1"))
+        try:
+            seed_val = int(request.config.getoption("--seed") or 0)
+        except Exception:
+            seed_val = 0
+        fs_original = scenario.get("faults", []) or []
+        fs_effective = fs_original
+        if faults_mode == "off":
+            fs_effective = []
+        elif faults_mode == "random":
+            try:
+                dur_default = int((scenario.get("workload") or {}).get("duration") or request.config.getoption("--duration"))
+            except Exception:
+                dur_default = int(os.environ.get("KEEPER_DURATION", "120"))
+            if seed_val &lt;= 0:
+                import os as _os
+                seed_val = int.from_bytes(_os.urandom(4), 'big')
+            try:
+                try:
+                    inc_raw = request.config.getoption("--random-faults-include") or os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                except Exception:
+                    inc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                try:
+                    exc_raw = request.config.getoption("--random-faults-exclude") or os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                except Exception:
+                    exc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                inc = set([x.strip() for x in (inc_raw or "").split(",") if x.strip()])
+                exc = set([x.strip() for x in (exc_raw or "").split(",") if x.strip()])
+                cands = [k for k in list(getattr(fault_registry, 'keys', lambda: [])()) if k not in _FUZZ_EXCLUDE]
+                if not cands and isinstance(fault_registry, dict):
+                    cands = [k for k in fault_registry.keys() if k not in _FUZZ_EXCLUDE]
+                weights = {}
+                if inc:
+                    for k in cands:
+                        weights[k] = 1 if k in inc else 0
+                else:
+                    for k in cands:
+                        weights[k] = 0 if k in exc else 1
+                fz = generate_fuzz_scenario(seed_val, max(1, rnd_count), dur_default, weights=weights)
+                rnd_faults = fz.get("faults", []) or []
+                rb = {"kind": "run_bench", "duration_s": dur_default}
+                fs_effective = [{"kind": "parallel", "steps": [rb] + rnd_faults}]
+            except Exception:
+                fs_effective = fs_original
+        try:
+            uses_dm = any((f.get("kind") in ("dm_delay","dm_error")) for f in fs_effective)
+            if uses_dm:
+                os.environ.setdefault("KEEPER_PRIVILEGED", "1")
+                os.environ.setdefault("KEEPER_HOST_AUTO_PROVISION", "1")
+            # Relax log gate for known transient errors during chaos if not provided by env
+            os.environ.setdefault(
+                "KEEPER_LOG_ALLOW",
+                "failed to read rpc header.*End of file|DNS error|Not found address of host|Net Exception: Socket is not connected|CANNOT_READ_ALL_DATA|Cannot read all data|Unknown table.*system\\.trace_log|Unknown table expression identifier 'system\\.trace_log'"
+            )
+        except Exception:
+            pass
+        # compute run_id early for reproducible artifact paths
+        run_id=f"{scenario.get('id','')}-{run_meta.get('commit_sha','local')}-{uuid.uuid4().hex[:8]}"
+        # Use a unique cluster name per test to avoid instance-dir collisions
+        try:
+            cname = run_id.replace('/', '_').replace(' ', '_')
+            os.environ["KEEPER_CLUSTER_NAME"] = cname
+        except Exception:
+            pass
+&gt;       cluster, nodes = cluster_factory(topo, backend, opts)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/stress/keeper/tests/test_scenarios.py:215: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/stress/keeper/tests/conftest.py:86: in _make
+    cluster, nodes = builder.build(topology=topology, backend=backend, opts=opts)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/core/cluster.py:200: in build
+    cluster.start()
+tests/integration/helpers/cluster.py:3728: in start
+    run_and_check(clickhouse_start_cmd)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ['docker', 'compose', '--env-file', '/home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-05[default|t3]-local-cbb0e71b/.env', '--project-name', 'ubuntutestscha05defaultt3localcbb0e71b', ...]
+env = None, shell = False, stdout = -1, stderr = -1, timeout = 300
+nothrow = False, detach = False
+
+    def run_and_check(
+        args: Union[Sequence[str], str],
+        env=None,
+        shell=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=300,
+        nothrow=False,
+        detach=False,
+    ) -&gt; str:
+        if shell:
+            if isinstance(args, str):
+                shell_args = args
+            else:
+                shell_args = next(a for a in args)
+        else:
+            shell_args = " ".join(args)
+    
+        logging.debug("Command:[%s]", shell_args)
+        if detach:
+            subprocess.Popen(
+                args,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                shell=shell,
+            )
+            return ""
+    
+        res = subprocess.run(
+            args,
+            stdout=stdout,
+            stderr=stderr,
+            env=env,
+            shell=shell,
+            timeout=timeout,
+            check=False,
+        )
+        out = res.stdout.decode("utf-8", "ignore")
+        err = res.stderr.decode("utf-8", "ignore")
+        # check_call(...) from subprocess does not print stderr, so we do it manually
+        for outline in out.splitlines():
+            logging.debug("Stdout:%s", outline)
+        for errline in err.splitlines():
+            logging.debug("Stderr:%s", errline)
+        if res.returncode != 0:
+            logging.debug("Exitcode:%s", res.returncode)
+            if env:
+                logging.debug("Env:%s", env)
+            if not nothrow:
+&gt;               raise Exception(
+                    f"Command [{shell_args}] return non-zero code {res.returncode}: {res.stderr.decode('utf-8')}"
+                )
+E               Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-05[default|t3]-local-cbb0e71b/.env --project-name ubuntutestscha05defaultt3localcbb0e71b --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-05[default|t3]-local-cbb0e71b/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-05[default|t3]-local-cbb0e71b/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-05[default|t3]-local-cbb0e71b/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestscha05defaultt3localcbb0e71b_default  Creating
+E                Network ubuntutestscha05defaultt3localcbb0e71b_default  Error
+E               failed to create network ubuntutestscha05defaultt3localcbb0e71b_default: Error response from daemon: all predefined address pools have been fully subnetted
+
+tests/integration/helpers/cluster.py:191: Exception</failure></testcase><testcase classname="tests.stress.keeper.tests.test_scenarios" name="test_scenario[CHA-05[rocksdb|t3]]" time="1.351"><failure message="Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-05[rocksdb|t3]-local-ca819ad0/.env --project-name ubuntutestscha05rocksdbt3localca819ad0 --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-05[rocksdb|t3]-local-ca819ad0/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-05[rocksdb|t3]-local-ca819ad0/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-05[rocksdb|t3]-local-ca819ad0/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestscha05rocksdbt3localca819ad0_default  Creating&#10; Network ubuntutestscha05rocksdbt3localca819ad0_default  Error&#10;failed to create network ubuntutestscha05rocksdbt3localca819ad0_default: Error response from daemon: all predefined address pools have been fully subnetted">scenario = {'backend': 'rocksdb', 'faults': [{'kind': 'stop_cont', True: ['keeper2'], 'count': 1, 'sleep_s': 2.0}, {'kind': 'stop...ms': 6000, 'type': 'p99_le'}, {'type': 'log_sanity_ok'}, {'type': 'health_precheck'}], 'id': 'CHA-05[rocksdb|t3]', ...}
+cluster_factory = &lt;function cluster_factory.&lt;locals&gt;._make at 0xe4851ed394e0&gt;
+request = &lt;FixtureRequest for &lt;Function test_scenario[CHA-05[rocksdb|t3]]&gt;&gt;
+run_meta = {'backend': 'default', 'commit_sha': 'local'}
+
+    @pytest.mark.timeout(2400)
+    def test_scenario(scenario, cluster_factory, request, run_meta):
+        start_ts = time.time()
+        topo=scenario.get("topology",3)
+        flags=scenario.get("keeper_flags_xml","")
+        backend = scenario.get("backend") or request.config.getoption("--keeper-backend")
+        # Effective run_meta per test with the scenario-selected backend
+        run_meta_eff = dict(run_meta or {})
+        try:
+            run_meta_eff["backend"] = backend
+        except Exception:
+            pass
+        opts=scenario.get("opts", {})
+        try:
+            faults_mode = request.config.getoption("--faults")
+        except Exception:
+            faults_mode = os.environ.get("KEEPER_FAULTS", "on")
+        try:
+            rnd_count = int(request.config.getoption("--random-faults-count") or 1)
+        except Exception:
+            rnd_count = int(os.environ.get("KEEPER_RANDOM_FAULTS_COUNT", "1"))
+        try:
+            seed_val = int(request.config.getoption("--seed") or 0)
+        except Exception:
+            seed_val = 0
+        fs_original = scenario.get("faults", []) or []
+        fs_effective = fs_original
+        if faults_mode == "off":
+            fs_effective = []
+        elif faults_mode == "random":
+            try:
+                dur_default = int((scenario.get("workload") or {}).get("duration") or request.config.getoption("--duration"))
+            except Exception:
+                dur_default = int(os.environ.get("KEEPER_DURATION", "120"))
+            if seed_val &lt;= 0:
+                import os as _os
+                seed_val = int.from_bytes(_os.urandom(4), 'big')
+            try:
+                try:
+                    inc_raw = request.config.getoption("--random-faults-include") or os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                except Exception:
+                    inc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                try:
+                    exc_raw = request.config.getoption("--random-faults-exclude") or os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                except Exception:
+                    exc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                inc = set([x.strip() for x in (inc_raw or "").split(",") if x.strip()])
+                exc = set([x.strip() for x in (exc_raw or "").split(",") if x.strip()])
+                cands = [k for k in list(getattr(fault_registry, 'keys', lambda: [])()) if k not in _FUZZ_EXCLUDE]
+                if not cands and isinstance(fault_registry, dict):
+                    cands = [k for k in fault_registry.keys() if k not in _FUZZ_EXCLUDE]
+                weights = {}
+                if inc:
+                    for k in cands:
+                        weights[k] = 1 if k in inc else 0
+                else:
+                    for k in cands:
+                        weights[k] = 0 if k in exc else 1
+                fz = generate_fuzz_scenario(seed_val, max(1, rnd_count), dur_default, weights=weights)
+                rnd_faults = fz.get("faults", []) or []
+                rb = {"kind": "run_bench", "duration_s": dur_default}
+                fs_effective = [{"kind": "parallel", "steps": [rb] + rnd_faults}]
+            except Exception:
+                fs_effective = fs_original
+        try:
+            uses_dm = any((f.get("kind") in ("dm_delay","dm_error")) for f in fs_effective)
+            if uses_dm:
+                os.environ.setdefault("KEEPER_PRIVILEGED", "1")
+                os.environ.setdefault("KEEPER_HOST_AUTO_PROVISION", "1")
+            # Relax log gate for known transient errors during chaos if not provided by env
+            os.environ.setdefault(
+                "KEEPER_LOG_ALLOW",
+                "failed to read rpc header.*End of file|DNS error|Not found address of host|Net Exception: Socket is not connected|CANNOT_READ_ALL_DATA|Cannot read all data|Unknown table.*system\\.trace_log|Unknown table expression identifier 'system\\.trace_log'"
+            )
+        except Exception:
+            pass
+        # compute run_id early for reproducible artifact paths
+        run_id=f"{scenario.get('id','')}-{run_meta.get('commit_sha','local')}-{uuid.uuid4().hex[:8]}"
+        # Use a unique cluster name per test to avoid instance-dir collisions
+        try:
+            cname = run_id.replace('/', '_').replace(' ', '_')
+            os.environ["KEEPER_CLUSTER_NAME"] = cname
+        except Exception:
+            pass
+&gt;       cluster, nodes = cluster_factory(topo, backend, opts)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/stress/keeper/tests/test_scenarios.py:215: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/stress/keeper/tests/conftest.py:86: in _make
+    cluster, nodes = builder.build(topology=topology, backend=backend, opts=opts)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/core/cluster.py:200: in build
+    cluster.start()
+tests/integration/helpers/cluster.py:3728: in start
+    run_and_check(clickhouse_start_cmd)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ['docker', 'compose', '--env-file', '/home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-05[rocksdb|t3]-local-ca819ad0/.env', '--project-name', 'ubuntutestscha05rocksdbt3localca819ad0', ...]
+env = None, shell = False, stdout = -1, stderr = -1, timeout = 300
+nothrow = False, detach = False
+
+    def run_and_check(
+        args: Union[Sequence[str], str],
+        env=None,
+        shell=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=300,
+        nothrow=False,
+        detach=False,
+    ) -&gt; str:
+        if shell:
+            if isinstance(args, str):
+                shell_args = args
+            else:
+                shell_args = next(a for a in args)
+        else:
+            shell_args = " ".join(args)
+    
+        logging.debug("Command:[%s]", shell_args)
+        if detach:
+            subprocess.Popen(
+                args,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                shell=shell,
+            )
+            return ""
+    
+        res = subprocess.run(
+            args,
+            stdout=stdout,
+            stderr=stderr,
+            env=env,
+            shell=shell,
+            timeout=timeout,
+            check=False,
+        )
+        out = res.stdout.decode("utf-8", "ignore")
+        err = res.stderr.decode("utf-8", "ignore")
+        # check_call(...) from subprocess does not print stderr, so we do it manually
+        for outline in out.splitlines():
+            logging.debug("Stdout:%s", outline)
+        for errline in err.splitlines():
+            logging.debug("Stderr:%s", errline)
+        if res.returncode != 0:
+            logging.debug("Exitcode:%s", res.returncode)
+            if env:
+                logging.debug("Env:%s", env)
+            if not nothrow:
+&gt;               raise Exception(
+                    f"Command [{shell_args}] return non-zero code {res.returncode}: {res.stderr.decode('utf-8')}"
+                )
+E               Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-05[rocksdb|t3]-local-ca819ad0/.env --project-name ubuntutestscha05rocksdbt3localca819ad0 --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-05[rocksdb|t3]-local-ca819ad0/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-05[rocksdb|t3]-local-ca819ad0/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-05[rocksdb|t3]-local-ca819ad0/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestscha05rocksdbt3localca819ad0_default  Creating
+E                Network ubuntutestscha05rocksdbt3localca819ad0_default  Error
+E               failed to create network ubuntutestscha05rocksdbt3localca819ad0_default: Error response from daemon: all predefined address pools have been fully subnetted
+
+tests/integration/helpers/cluster.py:191: Exception</failure></testcase><testcase classname="tests.stress.keeper.tests.test_scenarios" name="test_scenario[CHA-06[default|t3]]" time="1.339"><failure message="Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-06[default|t3]-local-f21d9357/.env --project-name ubuntutestscha06defaultt3localf21d9357 --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-06[default|t3]-local-f21d9357/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-06[default|t3]-local-f21d9357/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-06[default|t3]-local-f21d9357/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestscha06defaultt3localf21d9357_default  Creating&#10; Network ubuntutestscha06defaultt3localf21d9357_default  Error&#10;failed to create network ubuntutestscha06defaultt3localf21d9357_default: Error response from daemon: all predefined address pools have been fully subnetted">scenario = {'backend': 'default', 'faults': [{'kind': 'parallel', 'steps': [{'kind': 'netem', True: 'all', 'delay_ms': 10, 'jitte...ms': 6000, 'type': 'p99_le'}, {'type': 'log_sanity_ok'}, {'type': 'health_precheck'}], 'id': 'CHA-06[default|t3]', ...}
+cluster_factory = &lt;function cluster_factory.&lt;locals&gt;._make at 0xe4851eb336a0&gt;
+request = &lt;FixtureRequest for &lt;Function test_scenario[CHA-06[default|t3]]&gt;&gt;
+run_meta = {'backend': 'default', 'commit_sha': 'local'}
+
+    @pytest.mark.timeout(2400)
+    def test_scenario(scenario, cluster_factory, request, run_meta):
+        start_ts = time.time()
+        topo=scenario.get("topology",3)
+        flags=scenario.get("keeper_flags_xml","")
+        backend = scenario.get("backend") or request.config.getoption("--keeper-backend")
+        # Effective run_meta per test with the scenario-selected backend
+        run_meta_eff = dict(run_meta or {})
+        try:
+            run_meta_eff["backend"] = backend
+        except Exception:
+            pass
+        opts=scenario.get("opts", {})
+        try:
+            faults_mode = request.config.getoption("--faults")
+        except Exception:
+            faults_mode = os.environ.get("KEEPER_FAULTS", "on")
+        try:
+            rnd_count = int(request.config.getoption("--random-faults-count") or 1)
+        except Exception:
+            rnd_count = int(os.environ.get("KEEPER_RANDOM_FAULTS_COUNT", "1"))
+        try:
+            seed_val = int(request.config.getoption("--seed") or 0)
+        except Exception:
+            seed_val = 0
+        fs_original = scenario.get("faults", []) or []
+        fs_effective = fs_original
+        if faults_mode == "off":
+            fs_effective = []
+        elif faults_mode == "random":
+            try:
+                dur_default = int((scenario.get("workload") or {}).get("duration") or request.config.getoption("--duration"))
+            except Exception:
+                dur_default = int(os.environ.get("KEEPER_DURATION", "120"))
+            if seed_val &lt;= 0:
+                import os as _os
+                seed_val = int.from_bytes(_os.urandom(4), 'big')
+            try:
+                try:
+                    inc_raw = request.config.getoption("--random-faults-include") or os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                except Exception:
+                    inc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                try:
+                    exc_raw = request.config.getoption("--random-faults-exclude") or os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                except Exception:
+                    exc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                inc = set([x.strip() for x in (inc_raw or "").split(",") if x.strip()])
+                exc = set([x.strip() for x in (exc_raw or "").split(",") if x.strip()])
+                cands = [k for k in list(getattr(fault_registry, 'keys', lambda: [])()) if k not in _FUZZ_EXCLUDE]
+                if not cands and isinstance(fault_registry, dict):
+                    cands = [k for k in fault_registry.keys() if k not in _FUZZ_EXCLUDE]
+                weights = {}
+                if inc:
+                    for k in cands:
+                        weights[k] = 1 if k in inc else 0
+                else:
+                    for k in cands:
+                        weights[k] = 0 if k in exc else 1
+                fz = generate_fuzz_scenario(seed_val, max(1, rnd_count), dur_default, weights=weights)
+                rnd_faults = fz.get("faults", []) or []
+                rb = {"kind": "run_bench", "duration_s": dur_default}
+                fs_effective = [{"kind": "parallel", "steps": [rb] + rnd_faults}]
+            except Exception:
+                fs_effective = fs_original
+        try:
+            uses_dm = any((f.get("kind") in ("dm_delay","dm_error")) for f in fs_effective)
+            if uses_dm:
+                os.environ.setdefault("KEEPER_PRIVILEGED", "1")
+                os.environ.setdefault("KEEPER_HOST_AUTO_PROVISION", "1")
+            # Relax log gate for known transient errors during chaos if not provided by env
+            os.environ.setdefault(
+                "KEEPER_LOG_ALLOW",
+                "failed to read rpc header.*End of file|DNS error|Not found address of host|Net Exception: Socket is not connected|CANNOT_READ_ALL_DATA|Cannot read all data|Unknown table.*system\\.trace_log|Unknown table expression identifier 'system\\.trace_log'"
+            )
+        except Exception:
+            pass
+        # compute run_id early for reproducible artifact paths
+        run_id=f"{scenario.get('id','')}-{run_meta.get('commit_sha','local')}-{uuid.uuid4().hex[:8]}"
+        # Use a unique cluster name per test to avoid instance-dir collisions
+        try:
+            cname = run_id.replace('/', '_').replace(' ', '_')
+            os.environ["KEEPER_CLUSTER_NAME"] = cname
+        except Exception:
+            pass
+&gt;       cluster, nodes = cluster_factory(topo, backend, opts)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/stress/keeper/tests/test_scenarios.py:215: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/stress/keeper/tests/conftest.py:86: in _make
+    cluster, nodes = builder.build(topology=topology, backend=backend, opts=opts)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/core/cluster.py:200: in build
+    cluster.start()
+tests/integration/helpers/cluster.py:3728: in start
+    run_and_check(clickhouse_start_cmd)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ['docker', 'compose', '--env-file', '/home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-06[default|t3]-local-f21d9357/.env', '--project-name', 'ubuntutestscha06defaultt3localf21d9357', ...]
+env = None, shell = False, stdout = -1, stderr = -1, timeout = 300
+nothrow = False, detach = False
+
+    def run_and_check(
+        args: Union[Sequence[str], str],
+        env=None,
+        shell=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=300,
+        nothrow=False,
+        detach=False,
+    ) -&gt; str:
+        if shell:
+            if isinstance(args, str):
+                shell_args = args
+            else:
+                shell_args = next(a for a in args)
+        else:
+            shell_args = " ".join(args)
+    
+        logging.debug("Command:[%s]", shell_args)
+        if detach:
+            subprocess.Popen(
+                args,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                shell=shell,
+            )
+            return ""
+    
+        res = subprocess.run(
+            args,
+            stdout=stdout,
+            stderr=stderr,
+            env=env,
+            shell=shell,
+            timeout=timeout,
+            check=False,
+        )
+        out = res.stdout.decode("utf-8", "ignore")
+        err = res.stderr.decode("utf-8", "ignore")
+        # check_call(...) from subprocess does not print stderr, so we do it manually
+        for outline in out.splitlines():
+            logging.debug("Stdout:%s", outline)
+        for errline in err.splitlines():
+            logging.debug("Stderr:%s", errline)
+        if res.returncode != 0:
+            logging.debug("Exitcode:%s", res.returncode)
+            if env:
+                logging.debug("Env:%s", env)
+            if not nothrow:
+&gt;               raise Exception(
+                    f"Command [{shell_args}] return non-zero code {res.returncode}: {res.stderr.decode('utf-8')}"
+                )
+E               Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-06[default|t3]-local-f21d9357/.env --project-name ubuntutestscha06defaultt3localf21d9357 --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-06[default|t3]-local-f21d9357/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-06[default|t3]-local-f21d9357/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-06[default|t3]-local-f21d9357/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestscha06defaultt3localf21d9357_default  Creating
+E                Network ubuntutestscha06defaultt3localf21d9357_default  Error
+E               failed to create network ubuntutestscha06defaultt3localf21d9357_default: Error response from daemon: all predefined address pools have been fully subnetted
+
+tests/integration/helpers/cluster.py:191: Exception</failure></testcase><testcase classname="tests.stress.keeper.tests.test_scenarios" name="test_scenario[CHA-06[rocksdb|t3]]" time="1.300"><failure message="Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-06[rocksdb|t3]-local-35034075/.env --project-name ubuntutestscha06rocksdbt3local35034075 --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-06[rocksdb|t3]-local-35034075/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-06[rocksdb|t3]-local-35034075/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-06[rocksdb|t3]-local-35034075/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestscha06rocksdbt3local35034075_default  Creating&#10; Network ubuntutestscha06rocksdbt3local35034075_default  Error&#10;failed to create network ubuntutestscha06rocksdbt3local35034075_default: Error response from daemon: all predefined address pools have been fully subnetted">scenario = {'backend': 'rocksdb', 'faults': [{'kind': 'parallel', 'steps': [{'kind': 'netem', True: 'all', 'delay_ms': 10, 'jitte...ms': 6000, 'type': 'p99_le'}, {'type': 'log_sanity_ok'}, {'type': 'health_precheck'}], 'id': 'CHA-06[rocksdb|t3]', ...}
+cluster_factory = &lt;function cluster_factory.&lt;locals&gt;._make at 0xe4851ed79a80&gt;
+request = &lt;FixtureRequest for &lt;Function test_scenario[CHA-06[rocksdb|t3]]&gt;&gt;
+run_meta = {'backend': 'default', 'commit_sha': 'local'}
+
+    @pytest.mark.timeout(2400)
+    def test_scenario(scenario, cluster_factory, request, run_meta):
+        start_ts = time.time()
+        topo=scenario.get("topology",3)
+        flags=scenario.get("keeper_flags_xml","")
+        backend = scenario.get("backend") or request.config.getoption("--keeper-backend")
+        # Effective run_meta per test with the scenario-selected backend
+        run_meta_eff = dict(run_meta or {})
+        try:
+            run_meta_eff["backend"] = backend
+        except Exception:
+            pass
+        opts=scenario.get("opts", {})
+        try:
+            faults_mode = request.config.getoption("--faults")
+        except Exception:
+            faults_mode = os.environ.get("KEEPER_FAULTS", "on")
+        try:
+            rnd_count = int(request.config.getoption("--random-faults-count") or 1)
+        except Exception:
+            rnd_count = int(os.environ.get("KEEPER_RANDOM_FAULTS_COUNT", "1"))
+        try:
+            seed_val = int(request.config.getoption("--seed") or 0)
+        except Exception:
+            seed_val = 0
+        fs_original = scenario.get("faults", []) or []
+        fs_effective = fs_original
+        if faults_mode == "off":
+            fs_effective = []
+        elif faults_mode == "random":
+            try:
+                dur_default = int((scenario.get("workload") or {}).get("duration") or request.config.getoption("--duration"))
+            except Exception:
+                dur_default = int(os.environ.get("KEEPER_DURATION", "120"))
+            if seed_val &lt;= 0:
+                import os as _os
+                seed_val = int.from_bytes(_os.urandom(4), 'big')
+            try:
+                try:
+                    inc_raw = request.config.getoption("--random-faults-include") or os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                except Exception:
+                    inc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                try:
+                    exc_raw = request.config.getoption("--random-faults-exclude") or os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                except Exception:
+                    exc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                inc = set([x.strip() for x in (inc_raw or "").split(",") if x.strip()])
+                exc = set([x.strip() for x in (exc_raw or "").split(",") if x.strip()])
+                cands = [k for k in list(getattr(fault_registry, 'keys', lambda: [])()) if k not in _FUZZ_EXCLUDE]
+                if not cands and isinstance(fault_registry, dict):
+                    cands = [k for k in fault_registry.keys() if k not in _FUZZ_EXCLUDE]
+                weights = {}
+                if inc:
+                    for k in cands:
+                        weights[k] = 1 if k in inc else 0
+                else:
+                    for k in cands:
+                        weights[k] = 0 if k in exc else 1
+                fz = generate_fuzz_scenario(seed_val, max(1, rnd_count), dur_default, weights=weights)
+                rnd_faults = fz.get("faults", []) or []
+                rb = {"kind": "run_bench", "duration_s": dur_default}
+                fs_effective = [{"kind": "parallel", "steps": [rb] + rnd_faults}]
+            except Exception:
+                fs_effective = fs_original
+        try:
+            uses_dm = any((f.get("kind") in ("dm_delay","dm_error")) for f in fs_effective)
+            if uses_dm:
+                os.environ.setdefault("KEEPER_PRIVILEGED", "1")
+                os.environ.setdefault("KEEPER_HOST_AUTO_PROVISION", "1")
+            # Relax log gate for known transient errors during chaos if not provided by env
+            os.environ.setdefault(
+                "KEEPER_LOG_ALLOW",
+                "failed to read rpc header.*End of file|DNS error|Not found address of host|Net Exception: Socket is not connected|CANNOT_READ_ALL_DATA|Cannot read all data|Unknown table.*system\\.trace_log|Unknown table expression identifier 'system\\.trace_log'"
+            )
+        except Exception:
+            pass
+        # compute run_id early for reproducible artifact paths
+        run_id=f"{scenario.get('id','')}-{run_meta.get('commit_sha','local')}-{uuid.uuid4().hex[:8]}"
+        # Use a unique cluster name per test to avoid instance-dir collisions
+        try:
+            cname = run_id.replace('/', '_').replace(' ', '_')
+            os.environ["KEEPER_CLUSTER_NAME"] = cname
+        except Exception:
+            pass
+&gt;       cluster, nodes = cluster_factory(topo, backend, opts)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/stress/keeper/tests/test_scenarios.py:215: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/stress/keeper/tests/conftest.py:86: in _make
+    cluster, nodes = builder.build(topology=topology, backend=backend, opts=opts)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/core/cluster.py:200: in build
+    cluster.start()
+tests/integration/helpers/cluster.py:3728: in start
+    run_and_check(clickhouse_start_cmd)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ['docker', 'compose', '--env-file', '/home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-06[rocksdb|t3]-local-35034075/.env', '--project-name', 'ubuntutestscha06rocksdbt3local35034075', ...]
+env = None, shell = False, stdout = -1, stderr = -1, timeout = 300
+nothrow = False, detach = False
+
+    def run_and_check(
+        args: Union[Sequence[str], str],
+        env=None,
+        shell=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=300,
+        nothrow=False,
+        detach=False,
+    ) -&gt; str:
+        if shell:
+            if isinstance(args, str):
+                shell_args = args
+            else:
+                shell_args = next(a for a in args)
+        else:
+            shell_args = " ".join(args)
+    
+        logging.debug("Command:[%s]", shell_args)
+        if detach:
+            subprocess.Popen(
+                args,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                shell=shell,
+            )
+            return ""
+    
+        res = subprocess.run(
+            args,
+            stdout=stdout,
+            stderr=stderr,
+            env=env,
+            shell=shell,
+            timeout=timeout,
+            check=False,
+        )
+        out = res.stdout.decode("utf-8", "ignore")
+        err = res.stderr.decode("utf-8", "ignore")
+        # check_call(...) from subprocess does not print stderr, so we do it manually
+        for outline in out.splitlines():
+            logging.debug("Stdout:%s", outline)
+        for errline in err.splitlines():
+            logging.debug("Stderr:%s", errline)
+        if res.returncode != 0:
+            logging.debug("Exitcode:%s", res.returncode)
+            if env:
+                logging.debug("Env:%s", env)
+            if not nothrow:
+&gt;               raise Exception(
+                    f"Command [{shell_args}] return non-zero code {res.returncode}: {res.stderr.decode('utf-8')}"
+                )
+E               Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-06[rocksdb|t3]-local-35034075/.env --project-name ubuntutestscha06rocksdbt3local35034075 --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-06[rocksdb|t3]-local-35034075/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-06[rocksdb|t3]-local-35034075/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-06[rocksdb|t3]-local-35034075/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestscha06rocksdbt3local35034075_default  Creating
+E                Network ubuntutestscha06rocksdbt3local35034075_default  Error
+E               failed to create network ubuntutestscha06rocksdbt3local35034075_default: Error response from daemon: all predefined address pools have been fully subnetted
+
+tests/integration/helpers/cluster.py:191: Exception</failure></testcase><testcase classname="tests.stress.keeper.tests.test_scenarios" name="test_scenario[CHA-10M-01[default|t3]]" time="1.250"><failure message="Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-10M-01[default|t3]-local-3221771a/.env --project-name ubuntutestscha10m01defaultt3local3221771a --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-10M-01[default|t3]-local-3221771a/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-10M-01[default|t3]-local-3221771a/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-10M-01[default|t3]-local-3221771a/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestscha10m01defaultt3local3221771a_default  Creating&#10; Network ubuntutestscha10m01defaultt3local3221771a_default  Error&#10;failed to create network ubuntutestscha10m01defaultt3local3221771a_default: Error response from daemon: all predefined address pools have been fully subnetted">scenario = {'backend': 'default', 'faults': [{'kind': 'parallel', 'steps': [{'config': 'workloads/prod_mix.yaml', 'duration_s': 6..., 'Cannot read all data'], 'type': 'log_sanity_ok'}, {'type': 'health_precheck'}], 'id': 'CHA-10M-01[default|t3]', ...}
+cluster_factory = &lt;function cluster_factory.&lt;locals&gt;._make at 0xe4851ed3ba60&gt;
+request = &lt;FixtureRequest for &lt;Function test_scenario[CHA-10M-01[default|t3]]&gt;&gt;
+run_meta = {'backend': 'default', 'commit_sha': 'local'}
+
+    @pytest.mark.timeout(2400)
+    def test_scenario(scenario, cluster_factory, request, run_meta):
+        start_ts = time.time()
+        topo=scenario.get("topology",3)
+        flags=scenario.get("keeper_flags_xml","")
+        backend = scenario.get("backend") or request.config.getoption("--keeper-backend")
+        # Effective run_meta per test with the scenario-selected backend
+        run_meta_eff = dict(run_meta or {})
+        try:
+            run_meta_eff["backend"] = backend
+        except Exception:
+            pass
+        opts=scenario.get("opts", {})
+        try:
+            faults_mode = request.config.getoption("--faults")
+        except Exception:
+            faults_mode = os.environ.get("KEEPER_FAULTS", "on")
+        try:
+            rnd_count = int(request.config.getoption("--random-faults-count") or 1)
+        except Exception:
+            rnd_count = int(os.environ.get("KEEPER_RANDOM_FAULTS_COUNT", "1"))
+        try:
+            seed_val = int(request.config.getoption("--seed") or 0)
+        except Exception:
+            seed_val = 0
+        fs_original = scenario.get("faults", []) or []
+        fs_effective = fs_original
+        if faults_mode == "off":
+            fs_effective = []
+        elif faults_mode == "random":
+            try:
+                dur_default = int((scenario.get("workload") or {}).get("duration") or request.config.getoption("--duration"))
+            except Exception:
+                dur_default = int(os.environ.get("KEEPER_DURATION", "120"))
+            if seed_val &lt;= 0:
+                import os as _os
+                seed_val = int.from_bytes(_os.urandom(4), 'big')
+            try:
+                try:
+                    inc_raw = request.config.getoption("--random-faults-include") or os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                except Exception:
+                    inc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                try:
+                    exc_raw = request.config.getoption("--random-faults-exclude") or os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                except Exception:
+                    exc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                inc = set([x.strip() for x in (inc_raw or "").split(",") if x.strip()])
+                exc = set([x.strip() for x in (exc_raw or "").split(",") if x.strip()])
+                cands = [k for k in list(getattr(fault_registry, 'keys', lambda: [])()) if k not in _FUZZ_EXCLUDE]
+                if not cands and isinstance(fault_registry, dict):
+                    cands = [k for k in fault_registry.keys() if k not in _FUZZ_EXCLUDE]
+                weights = {}
+                if inc:
+                    for k in cands:
+                        weights[k] = 1 if k in inc else 0
+                else:
+                    for k in cands:
+                        weights[k] = 0 if k in exc else 1
+                fz = generate_fuzz_scenario(seed_val, max(1, rnd_count), dur_default, weights=weights)
+                rnd_faults = fz.get("faults", []) or []
+                rb = {"kind": "run_bench", "duration_s": dur_default}
+                fs_effective = [{"kind": "parallel", "steps": [rb] + rnd_faults}]
+            except Exception:
+                fs_effective = fs_original
+        try:
+            uses_dm = any((f.get("kind") in ("dm_delay","dm_error")) for f in fs_effective)
+            if uses_dm:
+                os.environ.setdefault("KEEPER_PRIVILEGED", "1")
+                os.environ.setdefault("KEEPER_HOST_AUTO_PROVISION", "1")
+            # Relax log gate for known transient errors during chaos if not provided by env
+            os.environ.setdefault(
+                "KEEPER_LOG_ALLOW",
+                "failed to read rpc header.*End of file|DNS error|Not found address of host|Net Exception: Socket is not connected|CANNOT_READ_ALL_DATA|Cannot read all data|Unknown table.*system\\.trace_log|Unknown table expression identifier 'system\\.trace_log'"
+            )
+        except Exception:
+            pass
+        # compute run_id early for reproducible artifact paths
+        run_id=f"{scenario.get('id','')}-{run_meta.get('commit_sha','local')}-{uuid.uuid4().hex[:8]}"
+        # Use a unique cluster name per test to avoid instance-dir collisions
+        try:
+            cname = run_id.replace('/', '_').replace(' ', '_')
+            os.environ["KEEPER_CLUSTER_NAME"] = cname
+        except Exception:
+            pass
+&gt;       cluster, nodes = cluster_factory(topo, backend, opts)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/stress/keeper/tests/test_scenarios.py:215: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/stress/keeper/tests/conftest.py:86: in _make
+    cluster, nodes = builder.build(topology=topology, backend=backend, opts=opts)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/core/cluster.py:200: in build
+    cluster.start()
+tests/integration/helpers/cluster.py:3728: in start
+    run_and_check(clickhouse_start_cmd)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ['docker', 'compose', '--env-file', '/home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-10M-01[default|t3]-local-3221771a/.env', '--project-name', 'ubuntutestscha10m01defaultt3local3221771a', ...]
+env = None, shell = False, stdout = -1, stderr = -1, timeout = 300
+nothrow = False, detach = False
+
+    def run_and_check(
+        args: Union[Sequence[str], str],
+        env=None,
+        shell=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=300,
+        nothrow=False,
+        detach=False,
+    ) -&gt; str:
+        if shell:
+            if isinstance(args, str):
+                shell_args = args
+            else:
+                shell_args = next(a for a in args)
+        else:
+            shell_args = " ".join(args)
+    
+        logging.debug("Command:[%s]", shell_args)
+        if detach:
+            subprocess.Popen(
+                args,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                shell=shell,
+            )
+            return ""
+    
+        res = subprocess.run(
+            args,
+            stdout=stdout,
+            stderr=stderr,
+            env=env,
+            shell=shell,
+            timeout=timeout,
+            check=False,
+        )
+        out = res.stdout.decode("utf-8", "ignore")
+        err = res.stderr.decode("utf-8", "ignore")
+        # check_call(...) from subprocess does not print stderr, so we do it manually
+        for outline in out.splitlines():
+            logging.debug("Stdout:%s", outline)
+        for errline in err.splitlines():
+            logging.debug("Stderr:%s", errline)
+        if res.returncode != 0:
+            logging.debug("Exitcode:%s", res.returncode)
+            if env:
+                logging.debug("Env:%s", env)
+            if not nothrow:
+&gt;               raise Exception(
+                    f"Command [{shell_args}] return non-zero code {res.returncode}: {res.stderr.decode('utf-8')}"
+                )
+E               Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-10M-01[default|t3]-local-3221771a/.env --project-name ubuntutestscha10m01defaultt3local3221771a --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-10M-01[default|t3]-local-3221771a/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-10M-01[default|t3]-local-3221771a/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-10M-01[default|t3]-local-3221771a/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestscha10m01defaultt3local3221771a_default  Creating
+E                Network ubuntutestscha10m01defaultt3local3221771a_default  Error
+E               failed to create network ubuntutestscha10m01defaultt3local3221771a_default: Error response from daemon: all predefined address pools have been fully subnetted
+
+tests/integration/helpers/cluster.py:191: Exception</failure></testcase><testcase classname="tests.stress.keeper.tests.test_scenarios" name="test_scenario[CHA-10M-01[rocksdb|t3]]" time="1.242"><failure message="Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-10M-01[rocksdb|t3]-local-e29cae74/.env --project-name ubuntutestscha10m01rocksdbt3locale29cae74 --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-10M-01[rocksdb|t3]-local-e29cae74/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-10M-01[rocksdb|t3]-local-e29cae74/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-10M-01[rocksdb|t3]-local-e29cae74/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestscha10m01rocksdbt3locale29cae74_default  Creating&#10; Network ubuntutestscha10m01rocksdbt3locale29cae74_default  Error&#10;failed to create network ubuntutestscha10m01rocksdbt3locale29cae74_default: Error response from daemon: all predefined address pools have been fully subnetted">scenario = {'backend': 'rocksdb', 'faults': [{'kind': 'parallel', 'steps': [{'config': 'workloads/prod_mix.yaml', 'duration_s': 6..., 'Cannot read all data'], 'type': 'log_sanity_ok'}, {'type': 'health_precheck'}], 'id': 'CHA-10M-01[rocksdb|t3]', ...}
+cluster_factory = &lt;function cluster_factory.&lt;locals&gt;._make at 0xe4851eedcb80&gt;
+request = &lt;FixtureRequest for &lt;Function test_scenario[CHA-10M-01[rocksdb|t3]]&gt;&gt;
+run_meta = {'backend': 'default', 'commit_sha': 'local'}
+
+    @pytest.mark.timeout(2400)
+    def test_scenario(scenario, cluster_factory, request, run_meta):
+        start_ts = time.time()
+        topo=scenario.get("topology",3)
+        flags=scenario.get("keeper_flags_xml","")
+        backend = scenario.get("backend") or request.config.getoption("--keeper-backend")
+        # Effective run_meta per test with the scenario-selected backend
+        run_meta_eff = dict(run_meta or {})
+        try:
+            run_meta_eff["backend"] = backend
+        except Exception:
+            pass
+        opts=scenario.get("opts", {})
+        try:
+            faults_mode = request.config.getoption("--faults")
+        except Exception:
+            faults_mode = os.environ.get("KEEPER_FAULTS", "on")
+        try:
+            rnd_count = int(request.config.getoption("--random-faults-count") or 1)
+        except Exception:
+            rnd_count = int(os.environ.get("KEEPER_RANDOM_FAULTS_COUNT", "1"))
+        try:
+            seed_val = int(request.config.getoption("--seed") or 0)
+        except Exception:
+            seed_val = 0
+        fs_original = scenario.get("faults", []) or []
+        fs_effective = fs_original
+        if faults_mode == "off":
+            fs_effective = []
+        elif faults_mode == "random":
+            try:
+                dur_default = int((scenario.get("workload") or {}).get("duration") or request.config.getoption("--duration"))
+            except Exception:
+                dur_default = int(os.environ.get("KEEPER_DURATION", "120"))
+            if seed_val &lt;= 0:
+                import os as _os
+                seed_val = int.from_bytes(_os.urandom(4), 'big')
+            try:
+                try:
+                    inc_raw = request.config.getoption("--random-faults-include") or os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                except Exception:
+                    inc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                try:
+                    exc_raw = request.config.getoption("--random-faults-exclude") or os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                except Exception:
+                    exc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                inc = set([x.strip() for x in (inc_raw or "").split(",") if x.strip()])
+                exc = set([x.strip() for x in (exc_raw or "").split(",") if x.strip()])
+                cands = [k for k in list(getattr(fault_registry, 'keys', lambda: [])()) if k not in _FUZZ_EXCLUDE]
+                if not cands and isinstance(fault_registry, dict):
+                    cands = [k for k in fault_registry.keys() if k not in _FUZZ_EXCLUDE]
+                weights = {}
+                if inc:
+                    for k in cands:
+                        weights[k] = 1 if k in inc else 0
+                else:
+                    for k in cands:
+                        weights[k] = 0 if k in exc else 1
+                fz = generate_fuzz_scenario(seed_val, max(1, rnd_count), dur_default, weights=weights)
+                rnd_faults = fz.get("faults", []) or []
+                rb = {"kind": "run_bench", "duration_s": dur_default}
+                fs_effective = [{"kind": "parallel", "steps": [rb] + rnd_faults}]
+            except Exception:
+                fs_effective = fs_original
+        try:
+            uses_dm = any((f.get("kind") in ("dm_delay","dm_error")) for f in fs_effective)
+            if uses_dm:
+                os.environ.setdefault("KEEPER_PRIVILEGED", "1")
+                os.environ.setdefault("KEEPER_HOST_AUTO_PROVISION", "1")
+            # Relax log gate for known transient errors during chaos if not provided by env
+            os.environ.setdefault(
+                "KEEPER_LOG_ALLOW",
+                "failed to read rpc header.*End of file|DNS error|Not found address of host|Net Exception: Socket is not connected|CANNOT_READ_ALL_DATA|Cannot read all data|Unknown table.*system\\.trace_log|Unknown table expression identifier 'system\\.trace_log'"
+            )
+        except Exception:
+            pass
+        # compute run_id early for reproducible artifact paths
+        run_id=f"{scenario.get('id','')}-{run_meta.get('commit_sha','local')}-{uuid.uuid4().hex[:8]}"
+        # Use a unique cluster name per test to avoid instance-dir collisions
+        try:
+            cname = run_id.replace('/', '_').replace(' ', '_')
+            os.environ["KEEPER_CLUSTER_NAME"] = cname
+        except Exception:
+            pass
+&gt;       cluster, nodes = cluster_factory(topo, backend, opts)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/stress/keeper/tests/test_scenarios.py:215: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/stress/keeper/tests/conftest.py:86: in _make
+    cluster, nodes = builder.build(topology=topology, backend=backend, opts=opts)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/core/cluster.py:200: in build
+    cluster.start()
+tests/integration/helpers/cluster.py:3728: in start
+    run_and_check(clickhouse_start_cmd)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ['docker', 'compose', '--env-file', '/home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-10M-01[rocksdb|t3]-local-e29cae74/.env', '--project-name', 'ubuntutestscha10m01rocksdbt3locale29cae74', ...]
+env = None, shell = False, stdout = -1, stderr = -1, timeout = 300
+nothrow = False, detach = False
+
+    def run_and_check(
+        args: Union[Sequence[str], str],
+        env=None,
+        shell=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=300,
+        nothrow=False,
+        detach=False,
+    ) -&gt; str:
+        if shell:
+            if isinstance(args, str):
+                shell_args = args
+            else:
+                shell_args = next(a for a in args)
+        else:
+            shell_args = " ".join(args)
+    
+        logging.debug("Command:[%s]", shell_args)
+        if detach:
+            subprocess.Popen(
+                args,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                shell=shell,
+            )
+            return ""
+    
+        res = subprocess.run(
+            args,
+            stdout=stdout,
+            stderr=stderr,
+            env=env,
+            shell=shell,
+            timeout=timeout,
+            check=False,
+        )
+        out = res.stdout.decode("utf-8", "ignore")
+        err = res.stderr.decode("utf-8", "ignore")
+        # check_call(...) from subprocess does not print stderr, so we do it manually
+        for outline in out.splitlines():
+            logging.debug("Stdout:%s", outline)
+        for errline in err.splitlines():
+            logging.debug("Stderr:%s", errline)
+        if res.returncode != 0:
+            logging.debug("Exitcode:%s", res.returncode)
+            if env:
+                logging.debug("Env:%s", env)
+            if not nothrow:
+&gt;               raise Exception(
+                    f"Command [{shell_args}] return non-zero code {res.returncode}: {res.stderr.decode('utf-8')}"
+                )
+E               Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-10M-01[rocksdb|t3]-local-e29cae74/.env --project-name ubuntutestscha10m01rocksdbt3locale29cae74 --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-10M-01[rocksdb|t3]-local-e29cae74/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-10M-01[rocksdb|t3]-local-e29cae74/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-10M-01[rocksdb|t3]-local-e29cae74/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestscha10m01rocksdbt3locale29cae74_default  Creating
+E                Network ubuntutestscha10m01rocksdbt3locale29cae74_default  Error
+E               failed to create network ubuntutestscha10m01rocksdbt3locale29cae74_default: Error response from daemon: all predefined address pools have been fully subnetted
+
+tests/integration/helpers/cluster.py:191: Exception</failure></testcase><testcase classname="tests.stress.keeper.tests.test_scenarios" name="test_scenario[CHA-HEAVY-01[default|t3]]" time="1.277"><failure message="Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-HEAVY-01[default|t3]-local-177653a6/.env --project-name ubuntutestschaheavy01defaultt3local177653a6 --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-HEAVY-01[default|t3]-local-177653a6/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-HEAVY-01[default|t3]-local-177653a6/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-HEAVY-01[default|t3]-local-177653a6/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestschaheavy01defaultt3local177653a6_default  Creating&#10; Network ubuntutestschaheavy01defaultt3local177653a6_default  Error&#10;failed to create network ubuntutestschaheavy01defaultt3local177653a6_default: Error response from daemon: all predefined address pools have been fully subnetted">scenario = {'backend': 'default', 'faults': [{'kind': 'leader_kill_measure', True: 'leader', 'timeout_s': 60}, {'kind': 'parallel...atio': 0.1, 'type': 'error_rate_le'}, {'max_ms': 10000, 'type': 'p99_le'}, ...], 'id': 'CHA-HEAVY-01[default|t3]', ...}
+cluster_factory = &lt;function cluster_factory.&lt;locals&gt;._make at 0xe4851eb358a0&gt;
+request = &lt;FixtureRequest for &lt;Function test_scenario[CHA-HEAVY-01[default|t3]]&gt;&gt;
+run_meta = {'backend': 'default', 'commit_sha': 'local'}
+
+    @pytest.mark.timeout(2400)
+    def test_scenario(scenario, cluster_factory, request, run_meta):
+        start_ts = time.time()
+        topo=scenario.get("topology",3)
+        flags=scenario.get("keeper_flags_xml","")
+        backend = scenario.get("backend") or request.config.getoption("--keeper-backend")
+        # Effective run_meta per test with the scenario-selected backend
+        run_meta_eff = dict(run_meta or {})
+        try:
+            run_meta_eff["backend"] = backend
+        except Exception:
+            pass
+        opts=scenario.get("opts", {})
+        try:
+            faults_mode = request.config.getoption("--faults")
+        except Exception:
+            faults_mode = os.environ.get("KEEPER_FAULTS", "on")
+        try:
+            rnd_count = int(request.config.getoption("--random-faults-count") or 1)
+        except Exception:
+            rnd_count = int(os.environ.get("KEEPER_RANDOM_FAULTS_COUNT", "1"))
+        try:
+            seed_val = int(request.config.getoption("--seed") or 0)
+        except Exception:
+            seed_val = 0
+        fs_original = scenario.get("faults", []) or []
+        fs_effective = fs_original
+        if faults_mode == "off":
+            fs_effective = []
+        elif faults_mode == "random":
+            try:
+                dur_default = int((scenario.get("workload") or {}).get("duration") or request.config.getoption("--duration"))
+            except Exception:
+                dur_default = int(os.environ.get("KEEPER_DURATION", "120"))
+            if seed_val &lt;= 0:
+                import os as _os
+                seed_val = int.from_bytes(_os.urandom(4), 'big')
+            try:
+                try:
+                    inc_raw = request.config.getoption("--random-faults-include") or os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                except Exception:
+                    inc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                try:
+                    exc_raw = request.config.getoption("--random-faults-exclude") or os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                except Exception:
+                    exc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                inc = set([x.strip() for x in (inc_raw or "").split(",") if x.strip()])
+                exc = set([x.strip() for x in (exc_raw or "").split(",") if x.strip()])
+                cands = [k for k in list(getattr(fault_registry, 'keys', lambda: [])()) if k not in _FUZZ_EXCLUDE]
+                if not cands and isinstance(fault_registry, dict):
+                    cands = [k for k in fault_registry.keys() if k not in _FUZZ_EXCLUDE]
+                weights = {}
+                if inc:
+                    for k in cands:
+                        weights[k] = 1 if k in inc else 0
+                else:
+                    for k in cands:
+                        weights[k] = 0 if k in exc else 1
+                fz = generate_fuzz_scenario(seed_val, max(1, rnd_count), dur_default, weights=weights)
+                rnd_faults = fz.get("faults", []) or []
+                rb = {"kind": "run_bench", "duration_s": dur_default}
+                fs_effective = [{"kind": "parallel", "steps": [rb] + rnd_faults}]
+            except Exception:
+                fs_effective = fs_original
+        try:
+            uses_dm = any((f.get("kind") in ("dm_delay","dm_error")) for f in fs_effective)
+            if uses_dm:
+                os.environ.setdefault("KEEPER_PRIVILEGED", "1")
+                os.environ.setdefault("KEEPER_HOST_AUTO_PROVISION", "1")
+            # Relax log gate for known transient errors during chaos if not provided by env
+            os.environ.setdefault(
+                "KEEPER_LOG_ALLOW",
+                "failed to read rpc header.*End of file|DNS error|Not found address of host|Net Exception: Socket is not connected|CANNOT_READ_ALL_DATA|Cannot read all data|Unknown table.*system\\.trace_log|Unknown table expression identifier 'system\\.trace_log'"
+            )
+        except Exception:
+            pass
+        # compute run_id early for reproducible artifact paths
+        run_id=f"{scenario.get('id','')}-{run_meta.get('commit_sha','local')}-{uuid.uuid4().hex[:8]}"
+        # Use a unique cluster name per test to avoid instance-dir collisions
+        try:
+            cname = run_id.replace('/', '_').replace(' ', '_')
+            os.environ["KEEPER_CLUSTER_NAME"] = cname
+        except Exception:
+            pass
+&gt;       cluster, nodes = cluster_factory(topo, backend, opts)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/stress/keeper/tests/test_scenarios.py:215: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/stress/keeper/tests/conftest.py:86: in _make
+    cluster, nodes = builder.build(topology=topology, backend=backend, opts=opts)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/core/cluster.py:200: in build
+    cluster.start()
+tests/integration/helpers/cluster.py:3728: in start
+    run_and_check(clickhouse_start_cmd)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ['docker', 'compose', '--env-file', '/home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-HEAVY-01[default|t3]-local-177653a6/.env', '--project-name', 'ubuntutestschaheavy01defaultt3local177653a6', ...]
+env = None, shell = False, stdout = -1, stderr = -1, timeout = 300
+nothrow = False, detach = False
+
+    def run_and_check(
+        args: Union[Sequence[str], str],
+        env=None,
+        shell=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=300,
+        nothrow=False,
+        detach=False,
+    ) -&gt; str:
+        if shell:
+            if isinstance(args, str):
+                shell_args = args
+            else:
+                shell_args = next(a for a in args)
+        else:
+            shell_args = " ".join(args)
+    
+        logging.debug("Command:[%s]", shell_args)
+        if detach:
+            subprocess.Popen(
+                args,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                shell=shell,
+            )
+            return ""
+    
+        res = subprocess.run(
+            args,
+            stdout=stdout,
+            stderr=stderr,
+            env=env,
+            shell=shell,
+            timeout=timeout,
+            check=False,
+        )
+        out = res.stdout.decode("utf-8", "ignore")
+        err = res.stderr.decode("utf-8", "ignore")
+        # check_call(...) from subprocess does not print stderr, so we do it manually
+        for outline in out.splitlines():
+            logging.debug("Stdout:%s", outline)
+        for errline in err.splitlines():
+            logging.debug("Stderr:%s", errline)
+        if res.returncode != 0:
+            logging.debug("Exitcode:%s", res.returncode)
+            if env:
+                logging.debug("Env:%s", env)
+            if not nothrow:
+&gt;               raise Exception(
+                    f"Command [{shell_args}] return non-zero code {res.returncode}: {res.stderr.decode('utf-8')}"
+                )
+E               Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-HEAVY-01[default|t3]-local-177653a6/.env --project-name ubuntutestschaheavy01defaultt3local177653a6 --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-HEAVY-01[default|t3]-local-177653a6/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-HEAVY-01[default|t3]-local-177653a6/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-HEAVY-01[default|t3]-local-177653a6/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestschaheavy01defaultt3local177653a6_default  Creating
+E                Network ubuntutestschaheavy01defaultt3local177653a6_default  Error
+E               failed to create network ubuntutestschaheavy01defaultt3local177653a6_default: Error response from daemon: all predefined address pools have been fully subnetted
+
+tests/integration/helpers/cluster.py:191: Exception</failure></testcase><testcase classname="tests.stress.keeper.tests.test_scenarios" name="test_scenario[CHA-HEAVY-01[rocksdb|t3]]" time="1.273"><failure message="Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-HEAVY-01[rocksdb|t3]-local-ea95bc30/.env --project-name ubuntutestschaheavy01rocksdbt3localea95bc30 --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-HEAVY-01[rocksdb|t3]-local-ea95bc30/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-HEAVY-01[rocksdb|t3]-local-ea95bc30/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-HEAVY-01[rocksdb|t3]-local-ea95bc30/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestschaheavy01rocksdbt3localea95bc30_default  Creating&#10; Network ubuntutestschaheavy01rocksdbt3localea95bc30_default  Error&#10;failed to create network ubuntutestschaheavy01rocksdbt3localea95bc30_default: Error response from daemon: all predefined address pools have been fully subnetted">scenario = {'backend': 'rocksdb', 'faults': [{'kind': 'leader_kill_measure', True: 'leader', 'timeout_s': 60}, {'kind': 'parallel...atio': 0.1, 'type': 'error_rate_le'}, {'max_ms': 10000, 'type': 'p99_le'}, ...], 'id': 'CHA-HEAVY-01[rocksdb|t3]', ...}
+cluster_factory = &lt;function cluster_factory.&lt;locals&gt;._make at 0xe4851ed26700&gt;
+request = &lt;FixtureRequest for &lt;Function test_scenario[CHA-HEAVY-01[rocksdb|t3]]&gt;&gt;
+run_meta = {'backend': 'default', 'commit_sha': 'local'}
+
+    @pytest.mark.timeout(2400)
+    def test_scenario(scenario, cluster_factory, request, run_meta):
+        start_ts = time.time()
+        topo=scenario.get("topology",3)
+        flags=scenario.get("keeper_flags_xml","")
+        backend = scenario.get("backend") or request.config.getoption("--keeper-backend")
+        # Effective run_meta per test with the scenario-selected backend
+        run_meta_eff = dict(run_meta or {})
+        try:
+            run_meta_eff["backend"] = backend
+        except Exception:
+            pass
+        opts=scenario.get("opts", {})
+        try:
+            faults_mode = request.config.getoption("--faults")
+        except Exception:
+            faults_mode = os.environ.get("KEEPER_FAULTS", "on")
+        try:
+            rnd_count = int(request.config.getoption("--random-faults-count") or 1)
+        except Exception:
+            rnd_count = int(os.environ.get("KEEPER_RANDOM_FAULTS_COUNT", "1"))
+        try:
+            seed_val = int(request.config.getoption("--seed") or 0)
+        except Exception:
+            seed_val = 0
+        fs_original = scenario.get("faults", []) or []
+        fs_effective = fs_original
+        if faults_mode == "off":
+            fs_effective = []
+        elif faults_mode == "random":
+            try:
+                dur_default = int((scenario.get("workload") or {}).get("duration") or request.config.getoption("--duration"))
+            except Exception:
+                dur_default = int(os.environ.get("KEEPER_DURATION", "120"))
+            if seed_val &lt;= 0:
+                import os as _os
+                seed_val = int.from_bytes(_os.urandom(4), 'big')
+            try:
+                try:
+                    inc_raw = request.config.getoption("--random-faults-include") or os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                except Exception:
+                    inc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", "")
+                try:
+                    exc_raw = request.config.getoption("--random-faults-exclude") or os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                except Exception:
+                    exc_raw = os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", "")
+                inc = set([x.strip() for x in (inc_raw or "").split(",") if x.strip()])
+                exc = set([x.strip() for x in (exc_raw or "").split(",") if x.strip()])
+                cands = [k for k in list(getattr(fault_registry, 'keys', lambda: [])()) if k not in _FUZZ_EXCLUDE]
+                if not cands and isinstance(fault_registry, dict):
+                    cands = [k for k in fault_registry.keys() if k not in _FUZZ_EXCLUDE]
+                weights = {}
+                if inc:
+                    for k in cands:
+                        weights[k] = 1 if k in inc else 0
+                else:
+                    for k in cands:
+                        weights[k] = 0 if k in exc else 1
+                fz = generate_fuzz_scenario(seed_val, max(1, rnd_count), dur_default, weights=weights)
+                rnd_faults = fz.get("faults", []) or []
+                rb = {"kind": "run_bench", "duration_s": dur_default}
+                fs_effective = [{"kind": "parallel", "steps": [rb] + rnd_faults}]
+            except Exception:
+                fs_effective = fs_original
+        try:
+            uses_dm = any((f.get("kind") in ("dm_delay","dm_error")) for f in fs_effective)
+            if uses_dm:
+                os.environ.setdefault("KEEPER_PRIVILEGED", "1")
+                os.environ.setdefault("KEEPER_HOST_AUTO_PROVISION", "1")
+            # Relax log gate for known transient errors during chaos if not provided by env
+            os.environ.setdefault(
+                "KEEPER_LOG_ALLOW",
+                "failed to read rpc header.*End of file|DNS error|Not found address of host|Net Exception: Socket is not connected|CANNOT_READ_ALL_DATA|Cannot read all data|Unknown table.*system\\.trace_log|Unknown table expression identifier 'system\\.trace_log'"
+            )
+        except Exception:
+            pass
+        # compute run_id early for reproducible artifact paths
+        run_id=f"{scenario.get('id','')}-{run_meta.get('commit_sha','local')}-{uuid.uuid4().hex[:8]}"
+        # Use a unique cluster name per test to avoid instance-dir collisions
+        try:
+            cname = run_id.replace('/', '_').replace(' ', '_')
+            os.environ["KEEPER_CLUSTER_NAME"] = cname
+        except Exception:
+            pass
+&gt;       cluster, nodes = cluster_factory(topo, backend, opts)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/stress/keeper/tests/test_scenarios.py:215: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/stress/keeper/tests/conftest.py:86: in _make
+    cluster, nodes = builder.build(topology=topology, backend=backend, opts=opts)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/stress/keeper/framework/core/cluster.py:200: in build
+    cluster.start()
+tests/integration/helpers/cluster.py:3728: in start
+    run_and_check(clickhouse_start_cmd)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ['docker', 'compose', '--env-file', '/home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-HEAVY-01[rocksdb|t3]-local-ea95bc30/.env', '--project-name', 'ubuntutestschaheavy01rocksdbt3localea95bc30', ...]
+env = None, shell = False, stdout = -1, stderr = -1, timeout = 300
+nothrow = False, detach = False
+
+    def run_and_check(
+        args: Union[Sequence[str], str],
+        env=None,
+        shell=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=300,
+        nothrow=False,
+        detach=False,
+    ) -&gt; str:
+        if shell:
+            if isinstance(args, str):
+                shell_args = args
+            else:
+                shell_args = next(a for a in args)
+        else:
+            shell_args = " ".join(args)
+    
+        logging.debug("Command:[%s]", shell_args)
+        if detach:
+            subprocess.Popen(
+                args,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                shell=shell,
+            )
+            return ""
+    
+        res = subprocess.run(
+            args,
+            stdout=stdout,
+            stderr=stderr,
+            env=env,
+            shell=shell,
+            timeout=timeout,
+            check=False,
+        )
+        out = res.stdout.decode("utf-8", "ignore")
+        err = res.stderr.decode("utf-8", "ignore")
+        # check_call(...) from subprocess does not print stderr, so we do it manually
+        for outline in out.splitlines():
+            logging.debug("Stdout:%s", outline)
+        for errline in err.splitlines():
+            logging.debug("Stderr:%s", errline)
+        if res.returncode != 0:
+            logging.debug("Exitcode:%s", res.returncode)
+            if env:
+                logging.debug("Env:%s", env)
+            if not nothrow:
+&gt;               raise Exception(
+                    f"Command [{shell_args}] return non-zero code {res.returncode}: {res.stderr.decode('utf-8')}"
+                )
+E               Exception: Command [docker compose --env-file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-HEAVY-01[rocksdb|t3]-local-ea95bc30/.env --project-name ubuntutestschaheavy01rocksdbt3localea95bc30 --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-HEAVY-01[rocksdb|t3]-local-ea95bc30/keeper1/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-HEAVY-01[rocksdb|t3]-local-ea95bc30/keeper2/docker-compose.yml --file /home/ubuntu/ClickHouse/tests/stress/keeper/tests/_instances-CHA-HEAVY-01[rocksdb|t3]-local-ea95bc30/keeper3/docker-compose.yml up -d --no-recreate] return non-zero code 1:  Network ubuntutestschaheavy01rocksdbt3localea95bc30_default  Creating
+E                Network ubuntutestschaheavy01rocksdbt3localea95bc30_default  Error
+E               failed to create network ubuntutestschaheavy01rocksdbt3localea95bc30_default: Error response from daemon: all predefined address pools have been fully subnetted
+
+tests/integration/helpers/cluster.py:191: Exception</failure></testcase></testsuite></testsuites>

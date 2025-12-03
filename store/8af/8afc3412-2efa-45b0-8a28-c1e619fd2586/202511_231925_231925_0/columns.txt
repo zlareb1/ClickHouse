@@ -1,0 +1,15 @@
+columns format version: 1
+13 columns:
+`hostname` LowCardinality(String)
+`type` Enum8('Begin' = 1, 'Commit' = 2, 'Rollback' = 3, 'AddPart' = 10, 'LockPart' = 11, 'UnlockPart' = 12)
+`event_date` Date
+`event_time` DateTime64(6)
+`thread_id` UInt64
+`query_id` String
+`tid` Tuple(UInt64, UInt64, UUID)
+`tid_hash` UInt64
+`csn` UInt64
+`database` String
+`table` String
+`uuid` UUID
+`part` String

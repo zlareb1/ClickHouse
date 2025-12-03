@@ -1,0 +1,9 @@
+columns format version: 1
+7 columns:
+`id` UInt64
+`call_date` DateTime
+`status` Nullable(String)
+`status_message` Nullable(String)
+`lock_time` Nullable(DateTime)
+`number_of_locks` UInt32
+`deleted_at` Nullable(DateTime)

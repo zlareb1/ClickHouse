@@ -1,0 +1,7 @@
+columns substreams version: 1
+2 columns:
+1 substreams for column `k`:
+	k
+2 substreams for column `v`:
+	v.null
+	v

@@ -101,6 +101,8 @@ class _Settings:
     CI_DB_DB_NAME = ""
     CI_DB_TABLE_NAME = ""
     CI_DB_INSERT_TIMEOUT_SEC = 5
+    KEEPER_CI_DB_DB_NAME: str = ""
+    KEEPER_CI_DB_TABLE_NAME: str = ""
 
     # to post links for reading statistics in html report (with read-only user)
     CI_DB_READ_USER: str = ""
@@ -139,6 +141,8 @@ _USER_DEFINED_SETTINGS = [
     "CI_DB_DB_NAME",
     "CI_DB_TABLE_NAME",
     "CI_DB_INSERT_TIMEOUT_SEC",
+    "KEEPER_CI_DB_DB_NAME",
+    "KEEPER_CI_DB_TABLE_NAME",
     "USE_CUSTOM_GH_AUTH",
     "SECRET_GH_APP_ID",
     "SECRET_GH_APP_PEM_KEY",

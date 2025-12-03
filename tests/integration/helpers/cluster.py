@@ -3991,6 +3991,7 @@ services:
             - /etc/passwd:/etc/passwd:ro
             - {HELPERS_DIR}/../integration-tests-entrypoint.sh:/integration-tests-entrypoint.sh
             - {CLICKHOUSE_ROOT_DIR}:/debug:ro
+            {dev_mount}
             {metrika_xml}
             {binary_volume}
             {external_dirs_volumes}
@@ -4014,6 +4015,7 @@ services:
             - NET_ADMIN
             - IPC_LOCK
             - SYS_NICE
+            - SYS_TIME
             # for umount/mount on fly
             - SYS_ADMIN
         depends_on: {depends_on}
@@ -4023,6 +4025,7 @@ services:
         security_opt:
             - label:disable
             - seccomp:unconfined
+        privileged: {privileged}
         dns_opt:
             - attempts:2
             - timeout:1
@@ -5607,7 +5610,15 @@ class ClickHouseInstance:
                     net_alias1=net_alias1,
                     init_flag="true" if self.docker_init_flag else "false",
                     HELPERS_DIR=HELPERS_DIR,
-                    CLICKHOUSE_ROOT_DIR=CLICKHOUSE_ROOT_DIR
+                    CLICKHOUSE_ROOT_DIR=CLICKHOUSE_ROOT_DIR,
+                    privileged=(
+                        "true"
+                        if os.environ.get("KEEPER_PRIVILEGED", "").strip().lower() in ("1","true","yes","on")
+                        else "false"
+                    ),
+                    dev_mount=(
+                        "- /dev:/dev" if os.environ.get("KEEPER_PRIVILEGED", "").strip().lower() in ("1","true","yes","on") else ""
+                    ),
                 )
             )
 

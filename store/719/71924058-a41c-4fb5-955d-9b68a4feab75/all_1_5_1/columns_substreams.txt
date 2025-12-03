@@ -1,0 +1,9 @@
+columns substreams version: 1
+2 columns:
+1 substreams for column `id`:
+	id
+4 substreams for column `d`:
+	d.dynamic_structure
+	d.variant_discr_prefix
+	d.variant_discr
+	d.SharedVariant

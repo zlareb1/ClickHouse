@@ -1,0 +1,1 @@
+{"columns":[{"kind":"Default","name":"id","num_defaults":10,"num_rows":120000},{"kind":"Sparse","name":"p","num_defaults":60075,"num_rows":120000}],"version":0}

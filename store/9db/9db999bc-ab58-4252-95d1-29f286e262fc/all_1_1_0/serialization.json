@@ -1,0 +1,1 @@
+{"columns":[{"kind":"Default","name":"call_date","num_defaults":0,"num_rows":2},{"kind":"Default","name":"id","num_defaults":0,"num_rows":2},{"kind":"Sparse","name":"number_of_locks","num_defaults":2,"num_rows":2}],"types_serialization_versions":{"string":1},"version":1}

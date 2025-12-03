@@ -1,0 +1,1 @@
+{"columns":[{"kind":"Default","name":"l_discount","num_defaults":4020,"num_rows":200000},{"kind":"Default","name":"l_extendedprice","num_defaults":0,"num_rows":200000},{"kind":"Default","name":"l_partkey","num_defaults":10,"num_rows":200000},{"kind":"Default","name":"l_shipdate","num_defaults":0,"num_rows":200000}],"version":0}

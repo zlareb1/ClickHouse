@@ -1,0 +1,7 @@
+columns format version: 1
+5 columns:
+`SrcIp` UInt64
+`SrcPort` UInt16
+`DestIp` UInt64
+`DestPort` UInt16
+`SegmentValue` UInt8

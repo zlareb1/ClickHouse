@@ -1,0 +1,1 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="0" skipped="0" tests="1" time="63.374" timestamp="2025-12-01T14:54:28.179481+00:00" hostname="ip-10-2-3-62"><testcase classname="tests.stress.keeper.tests.test_scenarios" name="test_scenario[CHA-01[default|t3]]" time="15.060" /></testsuite></testsuites>

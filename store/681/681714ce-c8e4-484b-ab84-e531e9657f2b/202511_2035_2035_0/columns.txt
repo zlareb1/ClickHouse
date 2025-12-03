@@ -1,0 +1,12 @@
+columns format version: 1
+10 columns:
+`hostname` LowCardinality(String)
+`trace_id` UUID
+`span_id` UInt64
+`parent_span_id` UInt64
+`operation_name` LowCardinality(String)
+`kind` Enum8('INTERNAL' = 0, 'SERVER' = 1, 'CLIENT' = 2, 'PRODUCER' = 3, 'CONSUMER' = 4)
+`start_time_us` UInt64
+`finish_time_us` UInt64
+`finish_date` Date
+`attribute` Map(LowCardinality(String), String)

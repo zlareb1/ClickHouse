@@ -1,0 +1,13 @@
+columns substreams version: 1
+2 columns:
+8 substreams for column `d`:
+	d.dynamic_structure
+	d.variant_discr_prefix
+	d.variant_discr
+	d.Int16
+	d.Int32
+	d.Int64
+	d.Int8
+	d.SharedVariant
+1 substreams for column `_block_offset`:
+	_block_offset
