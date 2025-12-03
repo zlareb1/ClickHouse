@@ -102,14 +102,6 @@ def cluster_factory(request):
         return cluster, nodes
     return _make
 
-@pytest.fixture(scope="function")
-def seed(request):
-    val = int(request.config.getoption("--seed") or 0)
-    if val <= 0:
-        import os as _os
-        val = int.from_bytes(_os.urandom(4), 'big')
-    return val
-
 def pytest_collection_modifyitems(config, items):
     run_weekly = parse_bool(os.environ.get("KEEPER_RUN_WEEKLY"))
     if run_weekly:
