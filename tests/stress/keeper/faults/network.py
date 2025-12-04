@@ -5,8 +5,8 @@ from ..framework.core.util import sh, resolve_targets, sh_root, has_bin
 from ..framework.core.settings import RAFT_PORT, DEFAULT_FAULT_DURATION_S
 from ..framework.core.registry import register_fault
 
-# Strict enforcement toggle (mirrors faults.py behavior)
-STRICT_FAULTS = os.environ.get("KEEPER_STRICT_FAULTS", "1").strip().lower() not in ("0","false","no","off")
+# Always strict enforcement
+STRICT_FAULTS = True
 
 
 @contextmanager

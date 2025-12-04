@@ -1,4 +1,8 @@
-from .base import *  # noqa: F401,F403
-from .disk import *  # noqa: F401,F403
-from .network import *  # noqa: F401,F403
-from .process import *  # noqa: F401,F403
+from .base import apply_step
+import importlib as _il
+
+# Import submodules for side-effect registration (register_fault decorators)
+for _m in ("disk", "network", "process"):
+    _il.import_module(f"{__name__}.{_m}")
+
+__all__ = ["apply_step"]

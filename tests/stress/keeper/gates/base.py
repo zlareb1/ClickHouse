@@ -3,7 +3,8 @@ from ..framework.core.util import wait_until
 from ..framework.io.probes import is_leader, count_leaders, wchs_total, any_ephemerals, lgif, ready, prom_metrics, four, mntr
 from ..framework.io.prom_parse import parse_prometheus_text
 from ..framework.core.settings import DEFAULT_ERROR_RATE, DEFAULT_P99_MS
-from ..workloads import KeeperBench, servers_arg
+from ..workloads.keeper_bench import KeeperBench
+from ..workloads.adapter import servers_arg
 
 
 def single_leader(nodes, timeout_s=60):

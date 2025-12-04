@@ -183,16 +183,12 @@ class KeeperBench:
             "duration_s": self.duration_s,
         }
         # Execute the bench tool (replay mode or generator mode)
-        try:
-            if self.replay_path:
-                hosts = _parse_hosts(self.servers)
-                hflags = " ".join(f"-h {h}" for h in hosts)
-                cmd = f"{self._bench_cmd()} --input-request-log {self.replay_path} {hflags} -c {int(clients)} -t {int(self.duration_s)} --continue_on_errors --config /tmp/keeper_bench.yaml"
-            else:
-                cmd = f"{self._bench_cmd()} --config /tmp/keeper_bench.yaml"
-        except AssertionError:
-            # Bench tool is not present; best-effort skip in non-strict mode
-            return summary
+        if self.replay_path:
+            hosts = _parse_hosts(self.servers)
+            hflags = " ".join(f"-h {h}" for h in hosts)
+            cmd = f"{self._bench_cmd()} --input-request-log {self.replay_path} {hflags} -c {int(clients)} -t {int(self.duration_s)} --continue_on_errors --config /tmp/keeper_bench.yaml"
+        else:
+            cmd = f"{self._bench_cmd()} --config /tmp/keeper_bench.yaml"
         run_out = sh(self.node, cmd)
         # Parse JSON output if present
         out = sh(self.node, "cat /tmp/keeper_bench_out.json 2>/dev/null || cat keeper_bench_results.json 2>/dev/null")

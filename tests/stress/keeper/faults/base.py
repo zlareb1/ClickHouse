@@ -1,6 +1,10 @@
 import threading, time
 from typing import Any, Dict, List
 from ..framework.core.registry import fault_registry
+# Trigger register_fault decorators by importing fault modules
+from . import network as _faults_network  # noqa: F401
+from . import disk as _faults_disk  # noqa: F401
+from . import process as _faults_process  # noqa: F401
 from ..framework.core.util import resolve_targets
 from ..framework.io.probes import ready
 
@@ -13,13 +17,13 @@ def apply_step(step: Dict[str, Any], nodes, leader, ctx: Dict[str, Any]):
     fn = fault_registry.get(kind)
     if callable(fn):
         return fn(ctx, nodes, leader, step)
-    # Orchestrators / helpers (minimal, non-strict)
+    # Orchestrators / helpers
     if kind == "parallel":
         for sub in (step.get("steps") or []):
             apply_step(sub, nodes, leader, ctx)
         return
     if kind == "background_schedule":
-        # Minimal: run each step once
+        # Run each step once (no scheduler loop)
         for sub in (step.get("steps") or []):
             apply_step(sub, nodes, leader, ctx)
         return
@@ -56,8 +60,7 @@ def apply_step(step: Dict[str, Any], nodes, leader, ctx: Dict[str, Any]):
                     break
             time.sleep(0.5)
         return
+    # Placeholders / unknown kinds: treat as no-op to avoid breaking scenarios referencing legacy steps
     if kind in ("start", "download", "record_watch_baseline", "leader_kill_measure", "reconfig", "leader_only"):
-        # No-ops for refactor minimal path
         return
-    # Unknown: ignore in stress minimal mode
     return

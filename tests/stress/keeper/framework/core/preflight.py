@@ -1,6 +1,4 @@
-import os
 from typing import Dict, Any, Iterable, Set
-from .settings import parse_bool
 from .util import has_bin
 
 
@@ -28,7 +26,6 @@ def _tools_for_faults(faults: Iterable[Dict[str, Any]]) -> Set[str]:
 
 
 def ensure_environment(nodes, scenario):
-    strict = parse_bool(os.environ.get("KEEPER_STRICT"))
     faults = (scenario or {}).get("faults") or []
     req = _tools_for_faults(faults)
     if not req:
@@ -48,9 +45,7 @@ def ensure_environment(nodes, scenario):
             bench_ok = False
         if not bench_ok:
             msg = f"keeper-bench not available on {getattr(n0, 'name', 'node')}: install utils/keeper-bench or provide clickhouse keeper-bench"
-            if strict:
-                raise AssertionError(msg)
-            print(f"[keeper.preflight] WARNING: {msg}")
+            raise AssertionError(msg)
         # If replay is requested, verify the file is accessible inside container
         try:
             wl = scenario.get("workload") or {}
@@ -60,9 +55,7 @@ def ensure_environment(nodes, scenario):
                 r2 = sh(n0, f"test -f {replay_path} >/dev/null 2>&1; echo $?")
                 if not str(r2.get("out", " ")).strip().endswith("0"):
                     msg = f"replay file not found inside container at {replay_path} (mount it, e.g. bind-mount host log to /artifacts)"
-                    if strict:
-                        raise AssertionError(msg)
-                    print(f"[keeper.preflight] WARNING: {msg}")
+                    raise AssertionError(msg)
         except Exception:
             pass
     missing = {}
@@ -72,8 +65,5 @@ def ensure_environment(nodes, scenario):
             missing[n.name] = miss_n
     if missing:
         msg = ", ".join(f"{name}: {', '.join(tools)}" for name, tools in missing.items())
-        if strict:
-            raise AssertionError(f"Missing required tools on nodes: {msg}")
-        # Print a warning for visibility in logs (non-strict mode)
-        print(f"[keeper.preflight] WARNING: Missing tools (some faults may be skipped): {msg}")
+        raise AssertionError(f"Missing required tools on nodes: {msg}")
     return None

@@ -46,7 +46,6 @@ def cluster_factory(request):
         _os.environ.setdefault("KEEPER_PRIVILEGED", "1")
         anchor = __file__  # stable anchor in tests dir
         builder = ClusterBuilder(anchor)
-        strict = parse_bool(os.environ.get("KEEPER_STRICT"))
         # Merge environment-provided feature flags / coordination overrides into scenario opts
         try:
             ff_env = os.environ.get("KEEPER_FEATURE_FLAGS", "").strip()
@@ -82,23 +81,13 @@ def cluster_factory(request):
                 opts = base_opts
         except Exception:
             pass
+        cluster, nodes = builder.build(topology=topology, backend=backend, opts=opts)
+        to = 120.0
         try:
-            cluster, nodes = builder.build(topology=topology, backend=backend, opts=opts)
+            to = float(os.environ.get("KEEPER_READY_TIMEOUT", "120"))
         except Exception:
-            if strict:
-                raise
-            pytest.xfail("keeper cluster cannot be started (ensure Docker is available and ClickHouse images/binaries are accessible)")
-        try:
             to = 120.0
-            try:
-                to = float(os.environ.get("KEEPER_READY_TIMEOUT", "120"))
-            except Exception:
-                to = 120.0
-            wait_until(lambda: count_leaders(nodes) == 1, timeout_s=to, interval=0.5, desc="cluster ready")
-        except Exception:
-            if strict:
-                raise
-            pytest.xfail("keeper cluster not ready (ensure Docker is available and ClickHouse images/binaries are accessible)")
+        wait_until(lambda: count_leaders(nodes) == 1, timeout_s=to, interval=0.5, desc="cluster ready")
         return cluster, nodes
     return _make
 
