@@ -5613,11 +5613,11 @@ class ClickHouseInstance:
                     CLICKHOUSE_ROOT_DIR=CLICKHOUSE_ROOT_DIR,
                     privileged=(
                         "true"
-                        if os.environ.get("KEEPER_PRIVILEGED", "").strip().lower() in ("1","true","yes","on")
+                        if os.environ.get("KEEPER_PRIVILEGED", "") == "1"
                         else "false"
                     ),
                     dev_mount=(
-                        "- /dev:/dev" if os.environ.get("KEEPER_PRIVILEGED", "").strip().lower() in ("1","true","yes","on") else ""
+                        "- /dev:/dev" if os.environ.get("KEEPER_PRIVILEGED", "") == "1" else ""
                     ),
                 )
             )
