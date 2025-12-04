@@ -1,4 +1,4 @@
-import os, pytest, sys, pathlib
+import os, pytest, pathlib
 
 def _sink_env():
     return os.environ.get("KEEPER_METRICS_CLICKHOUSE_URL", "").strip()
@@ -14,23 +14,16 @@ def pytest_addoption(parser):
     pa("--matrix-backends", action="store", default=os.environ.get("KEEPER_BACKENDS", ""))
     pa("--matrix-topologies", action="store", default=os.environ.get("KEEPER_TOPOLOGIES", ""))
     pa("--seed", type=int, default=int(os.environ.get("KEEPER_SEED", "0")))
-    pa("--keep-containers-on-fail", action="store_true", default=bool(int(os.environ.get("KEEPER_KEEP_ON_FAIL", "0"))))
+    pa("--keep-containers-on-fail", action="store_true", default=parse_bool(os.environ.get("KEEPER_KEEP_ON_FAIL")))
     pa("--faults", choices=("on","off","random"), default=os.environ.get("KEEPER_FAULTS", "on"))
     pa("--random-faults-count", type=int, default=int(os.environ.get("KEEPER_RANDOM_FAULTS_COUNT", "1")))
     pa("--random-faults-include", action="store", default=os.environ.get("KEEPER_RANDOM_FAULTS_INCLUDE", ""))
     pa("--random-faults-exclude", action="store", default=os.environ.get("KEEPER_RANDOM_FAULTS_EXCLUDE", ""))
     pa("--keeper-include-ids", action="store", default=os.environ.get("KEEPER_INCLUDE_IDS", ""))
-    pa("--log-allow", action="store", default=os.environ.get("KEEPER_LOG_ALLOW", ""))
-# Ensure framework and integration helpers are importable
-_BASE = pathlib.Path(__file__).parents[1]
-_REPO = _BASE.parents[2]
-sys.path.insert(0, str(_BASE))
-sys.path.insert(0, str(_REPO / "tests" / "integration"))
-
 from ..framework.core.settings import parse_bool
-from ..framework.core.cluster import ClusterBuilder
 from ..framework.core.util import wait_until
 from ..framework.io.probes import count_leaders
+from ..framework.core.cluster import ClusterBuilder
 
 pytest_plugins = ["tests.stress.keeper.pytest_plugins.scenario_loader"]
 
@@ -41,9 +34,7 @@ def run_meta(request):
 
 @pytest.fixture(scope="function")
 def cluster_factory(request):
-    def _make(topology:int, backend:str, opts:dict):
-        import os as _os
-        _os.environ.setdefault("KEEPER_PRIVILEGED", "1")
+    def _make(topology, backend, opts):
         anchor = __file__  # stable anchor in tests dir
         builder = ClusterBuilder(anchor)
         # Merge environment-provided feature flags / coordination overrides into scenario opts
@@ -58,14 +49,8 @@ def cluster_factory(request):
                         k, v = part.split("=", 1)
                     else:
                         k, v = part, "1"
-                    k = k.strip(); v = v.strip().lower()
-                    if v in ("1","true","yes","on"): flags[k] = 1
-                    elif v in ("0","false","no","off"): flags[k] = 0
-                    else:
-                        try:
-                            flags[k] = 1 if int(v) != 0 else 0
-                        except Exception:
-                            flags[k] = 1
+                    k = k.strip(); v = v.strip()
+                    flags[k] = 1 if v == "1" else 0
                 base_opts = dict(opts or {})
                 cur_ff = dict((base_opts.get("feature_flags") or {}))
                 cur_ff.update(flags)
@@ -109,40 +94,3 @@ def pytest_collection_modifyitems(config, items):
             pass
         items[:] = keep
 
-# Fallback 'scenario' fixture in case plugin isn't active (shouldn't happen but makes test self-reliant)
-@pytest.fixture(scope="function")
-def scenario(request):
-    if hasattr(request, "param"):
-        return request.param
-    import yaml
-    base = pathlib.Path(__file__).parents[1]
-    target = os.environ.get("KEEPER_SCENARIO_FILE", "all")
-    files = []
-    if str(target).strip().lower() in ("all", "auto", "*"):
-        files = sorted((base / "scenarios").glob("*.yaml"))
-    elif "," in str(target):
-        files = [base / "scenarios" / p.strip() for p in str(target).split(",") if p.strip()]
-    else:
-        files = [base / "scenarios" / str(target)]
-    extra = os.environ.get("KEEPER_EXTRA_SCENARIOS", "")
-    for p in [x.strip() for x in extra.split(",") if x.strip()]:
-        files.append(pathlib.Path(p))
-    scns = []
-    for path in files:
-        if path.exists():
-            data = yaml.safe_load(path.read_text()) or {}
-            if isinstance(data, dict) and isinstance(data.get("scenarios"), list):
-                scns.extend(data.get("scenarios") or [])
-    include = set([x for x in (os.environ.get("KEEPER_INCLUDE_IDS", "") or "").split(",") if x])
-    pick = None
-    for s in scns:
-        if include and s.get("id") not in include:
-            continue
-        pick = s
-        break
-    if pick is None:
-        pick = scns[0] if scns else {}
-    b = os.environ.get("KEEPER_BACKEND", "default")
-    out = dict(pick or {})
-    out["backend"] = out.get("backend") or b
-    return out

@@ -5,7 +5,13 @@ import os
 import pathlib
 import sys
 import yaml
-from typing import List
+
+# Ensure repo root is on sys.path so 'tests' namespace can be imported
+# list_scenarios.py is at tests/stress/keeper/tools/list_scenarios.py
+# repo root is parents[4]
+REPO = pathlib.Path(__file__).parents[4]
+if str(REPO) not in sys.path:
+    sys.path.insert(0, str(REPO))
 
 from tests.stress.keeper.pytest_plugins import scenario_loader as loader
 
@@ -13,7 +19,7 @@ from tests.stress.keeper.pytest_plugins import scenario_loader as loader
 SCN_BASE = pathlib.Path(__file__).parents[1] / "scenarios"
 
 
-def load_files(files_arg: str) -> List[pathlib.Path]:
+def load_files(files_arg):
     # CLI --files takes precedence; else env; else 'all'
     env_target = files_arg or os.environ.get("KEEPER_SCENARIO_FILE", "all")
     files = []
@@ -32,7 +38,7 @@ def load_files(files_arg: str) -> List[pathlib.Path]:
     return files
 
 
-def should_run(sid: str, total: int, index: int) -> bool:
+def should_run(sid, total, index):
     if total <= 1:
         return True
     import hashlib

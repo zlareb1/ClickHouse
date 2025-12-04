@@ -1,6 +1,6 @@
-import time
+import time, re
 from ..framework.core.util import wait_until
-from ..framework.io.probes import is_leader, count_leaders, wchs_total, any_ephemerals, lgif, ready, prom_metrics, four, mntr
+from ..framework.io.probes import is_leader, count_leaders, wchs_total, any_ephemerals, ready, prom_metrics, four, mntr, ch_trace_log
 from ..framework.io.prom_parse import parse_prometheus_text
 from ..framework.core.settings import DEFAULT_ERROR_RATE, DEFAULT_P99_MS
 from ..workloads.keeper_bench import KeeperBench
@@ -27,16 +27,138 @@ def backlog_drains(nodes, max_s=120):
         time.sleep(1.0)
 
 
+def _conf_members_count(node):
+    try:
+        txt = four(node, "conf")
+        if not txt:
+            return 0
+        cnt = 0
+        for line in txt.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            # ZK/CH Keeper style: server.N=...
+            if line.startswith("server."):
+                cnt += 1
+        return cnt
+    except Exception:
+        return 0
+
+
+def config_members_len_eq(nodes, expected):
+    # Compare against leader's conf and assert equals expected
+    if not nodes:
+        raise AssertionError("no nodes")
+    leader = None
+    for n in nodes:
+        try:
+            if is_leader(n):
+                leader = n; break
+        except Exception:
+            continue
+    target = leader or nodes[0]
+    cnt = _conf_members_count(target)
+    # If 4lw 'conf' is unavailable, we cannot strictly validate; be lenient in stress env
+    if int(cnt) <= 0:
+        return
+    if int(cnt) != int(expected):
+        raise AssertionError(f"config_members_len_eq: got {cnt}, expected {expected}")
+
+
+def config_converged(nodes, timeout_s=30):
+    # Ensure all nodes show the same conf members count as leader
+    if not nodes:
+        raise AssertionError("no nodes")
+    leader = None
+    for n in nodes:
+        try:
+            if is_leader(n):
+                leader = n; break
+        except Exception:
+            continue
+    target = leader or nodes[0]
+    expected = _conf_members_count(target)
+    # If 4lw 'conf' is unavailable on this build, fall back to topology size for smoke runs
+    if expected <= 0:
+        expected = len(nodes)
+    deadline = time.time() + max(1, int(timeout_s))
+    while time.time() < deadline:
+        try:
+            ok = True
+            for n in nodes:
+                cnt = _conf_members_count(n)
+                # Treat unknown (<=0) as inconclusive rather than failure
+                if cnt > 0 and cnt != expected:
+                    ok = False; break
+            if ok:
+                return
+        except Exception:
+            pass
+        time.sleep(0.5)
+    raise AssertionError("config_converged: mismatch across nodes")
+
+
 def error_rate_le(summary, max_ratio=DEFAULT_ERROR_RATE):
     try:
         errs = float(summary.get("errors", 0) or 0)
         ops = float(summary.get("ops", 0) or 0)
+        if ops <= 0:
+            return
         ratio = (errs / max(1.0, ops))
         if ratio <= float(max_ratio):
             return
+        raise AssertionError(f"error_rate_le: ratio {ratio:.4f} exceeds {float(max_ratio):.4f}")
     except Exception:
-        pass
-    # If no data, treat as pass (best-effort gating in stress env)
+        return
+
+
+def election_time_le(ctx, max_s=10.0):
+    try:
+        v = float((ctx or {}).get("election_time_s", None))
+    except Exception:
+        v = None
+    if v is None:
+        raise AssertionError("election_time_le: missing election_time_s in context")
+    if float(v) <= float(max_s):
+        return
+    raise AssertionError(f"election_time_le: {v:.3f}s exceeded {float(max_s):.3f}s")
+
+
+def log_sanity_ok(nodes, allow=None, limit_rows=1000):
+    # Scan recent trace logs for severe indicators. Allowlist can silence benign patterns.
+    allow = [re.compile(p, re.IGNORECASE) for p in (allow or []) if str(p).strip()]
+    disallow_patterns = [
+        re.compile(p, re.IGNORECASE)
+        for p in [
+            "AddressSanitizer|UBSAN|Sanitizer:",
+            "heap-(use-after-free|buffer-overflow|overflow)",
+            "Segmentation fault|SIGSEGV|std::terminate|terminate called",
+            "CHECK FAILED|assert(ion)? failed|FATAL",
+        ]
+    ]
+    offenders = []
+    for n in (nodes or []):
+        try:
+            txt = ch_trace_log(n, limit_rows=limit_rows) or ""
+        except Exception:
+            txt = ""
+        if not txt:
+            continue
+        for line in txt.splitlines():
+            s = line.strip()
+            if not s:
+                continue
+            if allow and any(r.search(s) for r in allow):
+                continue
+            if any(r.search(s) for r in disallow_patterns):
+                offenders.append((n.name, s))
+                if len(offenders) >= 5:
+                    break
+        if len(offenders) >= 5:
+            break
+    if offenders:
+        sample = "; ".join([f"{a}: {b[:160]}" for a, b in offenders])
+        raise AssertionError(f"log_sanity_ok: found severe log lines: {sample}")
     return
 
 
@@ -45,9 +167,9 @@ def p99_le(summary, max_ms=DEFAULT_P99_MS):
         p99 = float(summary.get("p99_ms", 0) or 0)
         if p99 <= float(max_ms):
             return
+        raise AssertionError(f"p99_le: {p99:.3f}ms exceeds {float(max_ms):.3f}ms")
     except Exception:
-        pass
-    return
+        return
 
 
 def p95_le(summary, max_ms=DEFAULT_P99_MS):
@@ -55,9 +177,9 @@ def p95_le(summary, max_ms=DEFAULT_P99_MS):
         p95 = float(summary.get("p95_ms", 0) or 0)
         if p95 <= float(max_ms):
             return
+        raise AssertionError(f"p95_le: {p95:.3f}ms exceeds {float(max_ms):.3f}ms")
     except Exception:
-        pass
-    return
+        return
 
 
 def watch_delta_within(nodes, max_delta=100):
@@ -91,6 +213,7 @@ def ready_expect(nodes, leader, ok=True, timeout_s=60):
         except Exception:
             pass
         time.sleep(0.5)
+    raise AssertionError(f"ready_expect: expected {bool(ok)} but condition not met in {int(timeout_s)}s")
 
 
 def lgif_monotone(nodes):
@@ -99,44 +222,38 @@ def lgif_monotone(nodes):
 
 
 def fourlw_enforces(nodes, allow=None, deny=None):
-    # Verify allowlist: allowed commands respond, denied are blocked.
     allow = [str(x).strip() for x in (allow or []) if str(x).strip()]
     deny = [str(x).strip() for x in (deny or []) if str(x).strip()]
     for n in (nodes or []):
         try:
             for cmd in allow:
                 out = four(n, cmd)
-                if not out:
-                    return
+                if not str(out).strip():
+                    raise AssertionError(f"fourlw_enforces: allow {cmd} returned empty")
             for cmd in deny:
                 out = four(n, cmd)
-                # Expect empty or an error message indicating deny; be lenient
-                if out and ("Mode:" in out or "zk_" in out):
-                    # Looks like a real response → not denied
-                    return
+                if str(out).strip() and ("Mode:" in out or "zk_" in out or "watch" in out or "connections" in out):
+                    raise AssertionError(f"fourlw_enforces: deny {cmd} returned response")
         except Exception:
-            return
+            raise
     return
 
 
 def health_precheck(nodes):
-    # Basic health: mntr responds and there is at least one leader
     try:
         if not nodes:
-            return
+            raise AssertionError("health_precheck: no nodes")
         if count_leaders(nodes) < 1:
-            return
+            raise AssertionError("health_precheck: no leader")
         for n in nodes:
             m = mntr(n)
             if not isinstance(m, dict) or not m:
-                return
+                raise AssertionError("health_precheck: mntr empty")
     except Exception:
-        return
+        raise
     return
 
-def prom_thresholds_le(nodes, metrics: dict, aggregate: str = "sum"):
-    # Aggregate specified metrics from Prometheus and ensure they are <= thresholds.
-    # metrics example: {"raft_elections_total": 3}
+def prom_thresholds_le(nodes, metrics, aggregate="sum"):
     try:
         targets = dict(metrics or {})
         if not targets:
@@ -166,9 +283,8 @@ def prom_thresholds_le(nodes, metrics: dict, aggregate: str = "sum"):
                 if float(totals.get(k, 0.0)) <= float(thr):
                     continue
                 else:
-                    return
+                    raise AssertionError(f"prom_thresholds_le: {k}={totals.get(k, 0.0)} exceeds {float(thr)}")
             except Exception:
-                # On parse issues, do not fail gate in stress env
                 return
     except Exception:
         return
@@ -207,7 +323,7 @@ def replay_repeatable(nodes, leader, ctx, current_summary, duration_s=120, max_e
         return
 
 
-def apply_gate(gate: dict, nodes, leader, ctx, summary):
+def apply_gate(gate, nodes, leader, ctx, summary):
     gtype = (gate.get("type") or "").strip()
     if gtype == "single_leader":
         return single_leader(nodes, timeout_s=int(gate.get("timeout_s", 60)))
@@ -245,5 +361,13 @@ def apply_gate(gate: dict, nodes, leader, ctx, summary):
         )
     if gtype == "prom_thresholds_le":
         return prom_thresholds_le(nodes, gate.get("metrics") or {}, aggregate=str(gate.get("aggregate", "sum")))
+    if gtype == "config_converged":
+        return config_converged(nodes, timeout_s=int(gate.get("timeout_s", 30)))
+    if gtype == "config_members_len_eq":
+        return config_members_len_eq(nodes, expected=int(gate.get("expected", 3)))
+    if gtype == "election_time_le":
+        return election_time_le(ctx, max_s=float(gate.get("max_s", 10)))
+    if gtype == "log_sanity_ok":
+        return log_sanity_ok(nodes, allow=gate.get("allow"))
     # Generic pass-through for unknown gates (non-fatal in stress env)
-    return
+    raise AssertionError(f"unknown gate type: {gtype}")

@@ -1,31 +1,38 @@
 import json
-from ..core.util import sh
+from ..core.util import sh, has_bin
 from ..core.settings import CLIENT_PORT, CONTROL_PORT, PROM_PORT
 
 def four(node, cmd):
-    # Prefer nc
+    # Prefer nc when available
     try:
-        return sh(node, f"printf '{cmd}\n' | nc -w1 127.0.0.1 {CLIENT_PORT}")['out']
+        if has_bin(node, "nc"):
+            out = sh(node, f"printf '{cmd}\\n' | nc -w1 127.0.0.1 {CLIENT_PORT}")['out']
+            if str(out).strip():
+                return out
     except Exception:
         pass
-    # Fallbacks: keeper-client variants
+    # Fallbacks: keeper-client variants (avoid history file by setting HOME)
     for c in [
-        f"clickhouse keeper-client --host 127.0.0.1 --port {CLIENT_PORT} -q '{cmd}'",
-        f"clickhouse keeper-client -p {CLIENT_PORT} -q '{cmd}'",
+        f"HOME=/tmp clickhouse keeper-client --host 127.0.0.1 --port {CLIENT_PORT} -q '{cmd}'",
+        f"HOME=/tmp clickhouse keeper-client -p {CLIENT_PORT} -q '{cmd}'",
     ]:
         try:
-            return sh(node, c + " 2>/dev/null")['out']
+            out = sh(node, c + " 2>/dev/null")['out']
+            if str(out).strip():
+                return out
         except Exception:
             continue
     # Last resort: use bash /dev/tcp to send 4lw and read reply
     try:
         devtcp = (
             f"exec 3<>/dev/tcp/127.0.0.1/{CLIENT_PORT}; "
-            f"printf '{cmd}\n' >&3; "
+            f"printf '{cmd}\\n' >&3; "
             f"cat <&3; "
             f"exec 3<&-; exec 3>&-"
         )
-        return sh(node, devtcp)['out']
+        out = sh(node, devtcp)['out']
+        if str(out).strip():
+            return out
     except Exception:
         pass
     return ""
@@ -76,8 +83,6 @@ def lgif(node):
             try: kv[p[0]]=int(p[1])
             except: pass
     return kv
-
-def srvr(node): return four(node, "srvr")
 
 def prom_metrics(node): return sh(node, f"curl -sf http://127.0.0.1:{PROM_PORT}/metrics")["out"]
 

@@ -33,7 +33,16 @@ def ensure_sink_schema(url):
         TTL ts + INTERVAL 30 DAY DELETE""",
     ]
     for ddl in ddls:
-        requests.post(url, params={"query": ddl}, headers=_auth_headers(), timeout=20)
+        last_exc = None
+        for attempt in range(2):
+            try:
+                r = requests.post(url, params={"query": ddl}, headers=_auth_headers(), timeout=20)
+                r.raise_for_status()
+                last_exc = None
+                break
+            except Exception as e:
+                last_exc = e
+                time.sleep(0.5 * (attempt + 1))
     _SEEDED = True
 
 def sink_clickhouse(url, table, rows):
@@ -48,7 +57,7 @@ def sink_clickhouse(url, table, rows):
     for i in range(0, len(rows), chunk_size):
         chunk = rows[i:i+chunk_size]
         body = "\n".join(json.dumps(r, ensure_ascii=False) for r in chunk).encode("utf-8")
-        headers = {}
+        headers = {"Content-Type": "application/json"}
         # Compress large bodies
         if len(body) > 1_000_000:
             body = gzip.compress(body)

@@ -29,14 +29,14 @@ def _should_run(sid, total, index):
 def _has_gate(s, gate_type):
     return any(g.get("type") == gate_type for g in (s.get("gates") or []))
 
-def _append_gate(s, gate: dict):
+def _append_gate(s, gate):
     gs = s.get("gates")
     if gs is None:
         s["gates"] = [gate]
     else:
         gs.append(gate)
 
-def _inject_gate_macros(s: dict):
+def _inject_gate_macros(s):
     """Inject common gate blocks based on scenario id patterns.
 
     This reduces duplication without altering the YAML file directly.
@@ -68,7 +68,7 @@ def _inject_gate_macros(s: dict):
         if not _has_gate(s, "p99_le"):
             _append_gate(s, {"type": "p99_le", "max_ms": int(DEFAULT_P99_MS)})
 
-def _inject_prefix_tags(s: dict):
+def _inject_prefix_tags(s):
     sid = str(s.get("id", ""))
     if not sid:
         return
@@ -136,7 +136,7 @@ def pytest_generate_tests(metafunc):
     mb = [x.strip() for x in mb if x.strip()]
     mtops = (_getopt(metafunc.config, "--matrix-topologies", None, "") or "").split(",")
     mtops = [int(x.strip()) for x in mtops if x.strip()]
-    def _marks_for(s: dict):
+    def _marks_for(s):
         ms = []
         faults = s.get("faults", []) or []
         gates = s.get("gates", []) or []
@@ -163,7 +163,7 @@ def pytest_generate_tests(metafunc):
         except Exception:
             pass
         # Also consider run_bench faults (possibly nested under parallel/background_schedule)
-        def _max_bench_duration(steps) -> int:
+        def _max_bench_duration(steps):
             if not steps: return 0
             m = 0
             for st in steps:
@@ -259,13 +259,13 @@ def pytest_generate_tests(metafunc):
         params.append(pytest.param(fs, marks=[pytest.mark.chaos, pytest.mark.slow], id=fs["id"]))
     metafunc.parametrize("scenario", params)
 
-def inject_gate_macros(s: dict) -> None:
+def inject_gate_macros(s):
     _inject_gate_macros(s)
 
-def inject_prefix_tags(s: dict) -> None:
+def inject_prefix_tags(s):
     _inject_prefix_tags(s)
 
-def expand_matrix_clones(s: dict, backends: list, topologies: list) -> list:
+def expand_matrix_clones(s, backends, topologies):
     clones = []
     backs = backends or [s.get("backend") or "default"]
     topos = topologies or [int(s.get("topology", 3))]

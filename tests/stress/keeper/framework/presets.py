@@ -1,19 +1,17 @@
-import os
-from typing import Any, Dict
 from .core.scenario_builder import ScenarioBuilder
 
 
 def build_gp3_jitter(
-    sid: str = "CHA-GP3-JIT",
-    name: str = "Network jitter + gp3-like disk",
-    topology: int = 3,
-    duration_s: int = 180,
-    delay_ms: int = 10,
-    jitter_ms: int = 5,
-    loss_pct: int = 0,
-    disk_ms: int = 3,
-    backend: str = "default",
-) -> Dict[str, Any]:
+    sid="CHA-GP3-JIT",
+    name="Network jitter + gp3-like disk",
+    topology=3,
+    duration_s=180,
+    delay_ms=10,
+    jitter_ms=5,
+    loss_pct=0,
+    disk_ms=3,
+    backend="default",
+):
     sb = ScenarioBuilder(sid, name, topology=topology, backend=backend)
     sb.set_workload_config("workloads/prod_mix.yaml", duration=duration_s)
     from .core.scenario_builder import with_jitter, with_gp3_disk
@@ -27,11 +25,11 @@ def build_gp3_jitter(
 
 
 def build_partition_during_reconfig(
-    sid: str = "RCFG-PART-NEG",
-    name: str = "Negative reconfig under partition",
-    topology: int = 3,
-    backend: str = "default",
-) -> Dict[str, Any]:
+    sid="RCFG-PART-NEG",
+    name="Negative reconfig under partition",
+    topology=3,
+    backend="default",
+):
     sb = ScenarioBuilder(sid, name, topology=topology, backend=backend)
     sb.set_workload_config("workloads/prod_mix.yaml", duration=120)
     sb.during(

@@ -4,8 +4,8 @@ __pycache__/
 *.pyo
 .pytest_cache/
 # Instance directories (kept on failure for debugging)
-tests/stress/keeper/tests/_instances-*/
+/tests/_instances-*/
 # Generated configs for local runs
-tests/stress/keeper/configs/
+/tests/configs/
 # Local virtualenvs
 .venv/

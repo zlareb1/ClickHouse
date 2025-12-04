@@ -5,8 +5,7 @@ def parse_bool(v):
         return v
     if v is None:
         return False
-    s = str(v).strip().lower()
-    return s in ("1", "true", "yes", "on")
+    return str(v).strip() == "1"
 
 RAFT_PORT = int(os.environ.get("KEEPER_RAFT_PORT", "9234") or "9234")
 CLIENT_PORT = int(os.environ.get("KEEPER_CLIENT_PORT", "9181") or "9181")

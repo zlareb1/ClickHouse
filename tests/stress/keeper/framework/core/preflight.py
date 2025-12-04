@@ -1,9 +1,10 @@
-from typing import Dict, Any, Iterable, Set
-from .util import has_bin
+import os
+from .util import has_bin, sh_root
+from .settings import parse_bool
 
 
-def _tools_for_faults(faults: Iterable[Dict[str, Any]]) -> Set[str]:
-    req: Set[str] = set()
+def _tools_for_faults(faults):
+    req = set()
     if not faults:
         return req
     kinds = set(str((f or {}).get("kind", "")).strip().lower() for f in faults if isinstance(f, dict))
@@ -20,8 +21,8 @@ def _tools_for_faults(faults: Iterable[Dict[str, Any]]) -> Set[str]:
     # Process / stress
     if "stress_ng" in kinds:
         req.update({"stress-ng"})
-    # 4lw helpers and HTTP probes
-    req.update({"nc", "curl", "bash"})
+    # HTTP probes and shell are required; 'nc' is optional (four() falls back without it)
+    req.update({"curl", "bash"})
     return req
 
 
@@ -31,7 +32,7 @@ def ensure_environment(nodes, scenario):
     if not req:
         req = set()
     # Keeper-bench presence (if workload is requested)
-    if isinstance(scenario, dict) and scenario.get("workload") and nodes:
+    if isinstance(scenario, dict) and scenario.get("workload") and nodes and not parse_bool(os.environ.get("KEEPER_DISABLE_WORKLOAD")):
         bench_ok = False
         n0 = nodes[0]
         try:
@@ -43,6 +44,16 @@ def ensure_environment(nodes, scenario):
                 bench_ok = str(r.get("out", " ")).strip().endswith("0")
         except Exception:
             bench_ok = False
+        if not bench_ok:
+            try:
+                url = os.environ.get("KEEPER_BENCH_URL", "").strip()
+                if url:
+                    for n in (nodes or []):
+                        sh_root(n, f"curl -sfL {url} -o /usr/local/bin/keeper-bench && chmod +x /usr/local/bin/keeper-bench")
+                    if has_bin(n0, "keeper-bench"):
+                        bench_ok = True
+            except Exception:
+                pass
         if not bench_ok:
             msg = f"keeper-bench not available on {getattr(n0, 'name', 'node')}: install utils/keeper-bench or provide clickhouse keeper-bench"
             raise AssertionError(msg)

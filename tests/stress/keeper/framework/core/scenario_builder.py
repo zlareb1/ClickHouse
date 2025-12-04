@@ -1,36 +1,36 @@
-from typing import Any, Dict, List, Optional
+ 
 
 class ScenarioBuilder:
-    def __init__(self, sid: str, name: str, topology: int = 3, backend: str = "default") -> None:
+    def __init__(self, sid, name, topology=3, backend="default"):
         self._sid = sid
         self._name = name
         self._topology = int(topology)
         self._backend = backend
-        self._workload: Dict[str, Any] = {}
-        self._pre: List[Dict[str, Any]] = []
-        self._faults: List[Dict[str, Any]] = []
-        self._gates: List[Dict[str, Any]] = []
+        self._workload = {}
+        self._pre = []
+        self._faults = []
+        self._gates = []
 
-    def set_workload_config(self, path: str, duration: int) -> None:
+    def set_workload_config(self, path, duration):
         self._workload = {"config": path, "duration": int(duration)}
 
-    def pre(self, step: Dict[str, Any]) -> None:
+    def pre(self, step):
         if step:
             self._pre.append(step)
 
-    def fault(self, step: Dict[str, Any]) -> None:
+    def fault(self, step):
         if step:
             self._faults.append(step)
 
-    def during(self, kind: str, on: Any, steps: List[Dict[str, Any]]) -> None:
+    def during(self, kind, on, steps):
         self._faults.append({"kind": str(kind), "on": on, "steps": list(steps or [])})
 
-    def gate(self, gate: Dict[str, Any]) -> None:
+    def gate(self, gate):
         if gate:
             self._gates.append(gate)
 
-    def build(self) -> Dict[str, Any]:
-        out: Dict[str, Any] = {
+    def build(self):
+        out = {
             "id": self._sid,
             "name": self._name,
             "topology": self._topology,
@@ -48,7 +48,7 @@ class ScenarioBuilder:
 
 # Helpers for presets
 
-def with_jitter(sb: ScenarioBuilder, delay_ms: int = 10, jitter_ms: int = 5, loss_pct: int = 0, duration_s: int = 120, target_parallel: bool = True) -> None:
+def with_jitter(sb, delay_ms=10, jitter_ms=5, loss_pct=0, duration_s=120, target_parallel=True):
     step = {"kind": "netem", "on": "all", "delay_ms": int(delay_ms)}
     if jitter_ms:
         step["jitter_ms"] = int(jitter_ms)
@@ -60,7 +60,7 @@ def with_jitter(sb: ScenarioBuilder, delay_ms: int = 10, jitter_ms: int = 5, los
     sb.fault(step)
 
 
-def with_gp3_disk(sb: ScenarioBuilder, ms: int = 3, duration_s: int = 120, target_parallel: bool = True) -> None:
+def with_gp3_disk(sb, ms=3, duration_s=120, target_parallel=True):
     step = {"kind": "dm_delay", "on": "all", "ms": int(ms), "duration_s": int(duration_s)}
     if target_parallel:
         step["target_parallel"] = True

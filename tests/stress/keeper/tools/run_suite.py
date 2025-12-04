@@ -5,7 +5,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-def _get_sink_env() -> str:
+def _get_sink_env():
     return os.environ.get("KEEPER_METRICS_CLICKHOUSE_URL", "").strip()
 
 def run(cmd, cwd):
@@ -22,7 +22,7 @@ def main():
     ap.add_argument("--include-ids", default=os.environ.get("KEEPER_INCLUDE_IDS", ""))
     ap.add_argument("--matrix-backends", default=os.environ.get("KEEPER_BACKENDS", ""))
     ap.add_argument("--matrix-topologies", default=os.environ.get("KEEPER_TOPOLOGIES", ""))
-    ap.add_argument("--include-faults-off", action="store_true", default=os.environ.get("KEEPER_INCLUDE_FAULTS_OFF", "").strip().lower() in ("1","true","yes","on"))
+    ap.add_argument("--include-faults-off", action="store_true", default=os.environ.get("KEEPER_INCLUDE_FAULTS_OFF", "") == "1")
     ap.add_argument("--sink-url", default=_get_sink_env())
     ap.add_argument("--feature-flags", default=os.environ.get("KEEPER_FEATURE_FLAGS", ""))
     ap.add_argument("--coord-overrides-xml", default=os.environ.get("KEEPER_COORD_OVERRIDES_XML", ""))
@@ -32,7 +32,6 @@ def main():
     repo = Path(__file__).parents[4]
     tests_path = "tests/stress/keeper/tests"
     env = os.environ.copy()
-    env["KEEPER_STRICT"] = "1"
     env.setdefault("KEEPER_SCENARIO_FILE", args.files)
     if args.sink_url:
         env["KEEPER_METRICS_CLICKHOUSE_URL"] = args.sink_url

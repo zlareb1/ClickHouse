@@ -13,6 +13,10 @@ from .base import (
     health_precheck,
     prom_thresholds_le,
     replay_repeatable,
+    config_converged,
+    config_members_len_eq,
+    election_time_le,
+    log_sanity_ok,
     apply_gate,
 )
 
@@ -31,5 +35,9 @@ __all__ = [
     "health_precheck",
     "prom_thresholds_le",
     "replay_repeatable",
+    "config_converged",
+    "config_members_len_eq",
+    "election_time_le",
+    "log_sanity_ok",
     "apply_gate",
 ]

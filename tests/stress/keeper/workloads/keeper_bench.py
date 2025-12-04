@@ -1,22 +1,21 @@
 import os, json, re
-from typing import Optional, Dict, Any, List
 import yaml
 from ..framework.core.util import sh, has_bin
 
 
-def _parse_hosts(servers: str) -> List[str]:
+def _parse_hosts(servers):
     return [p.strip() for p in (servers or "").split() if p.strip()]
 
 
-def _translate_workload(cfg_text: str, servers: str, duration_s: int) -> Dict[str, Any]:
+def _translate_workload(cfg_text, servers, duration_s):
     try:
         src = yaml.safe_load(cfg_text) or {}
     except Exception:
         src = {}
     name = src.get("name") or "bench"
     clients = int(src.get("clients", 1) or 1)
-    ops: List[Dict[str, Any]] = src.get("ops") or []
-    requests: Dict[str, Any] = {}
+    ops = src.get("ops") or []
+    requests = {}
     # Map our simplified ops spec into keeper-bench request generators
     for spec in ops:
         try:
@@ -29,7 +28,7 @@ def _translate_workload(cfg_text: str, servers: str, duration_s: int) -> Dict[st
         path_prefix = str(spec.get("path_prefix", "/bench")).strip() or "/bench"
         val_sz = int(spec.get("value_bytes", spec.get("value_size", 0)) or 0)
         if kind == "create":
-            ent: Dict[str, Any] = {"path": path_prefix, "name_length": 10}
+            ent = {"path": path_prefix, "name_length": 10}
             if val_sz > 0:
                 ent["data"] = {"random_string": {"size": val_sz}}
             ent["weight"] = weight
@@ -98,7 +97,7 @@ def _translate_workload(cfg_text: str, servers: str, duration_s: int) -> Dict[st
     sessions_total = max(1, clients)
     per_host = max(1, sessions_total // max(1, len(hosts) or 1))
     conn_list = [{"host": h, "sessions": per_host} for h in (hosts or [default_host])]
-    cfg: Dict[str, Any] = {
+    cfg = {
         "concurrency": clients,
         "iterations": 0,
         "report_delay": 1.0,
@@ -122,7 +121,7 @@ def _translate_workload(cfg_text: str, servers: str, duration_s: int) -> Dict[st
 
 
 class KeeperBench:
-    def __init__(self, node, servers: str, cfg_path: Optional[str] = None, duration_s: int = 120, replay_path: Optional[str] = None, secure: bool = False, clients: Optional[int] = None):
+    def __init__(self, node, servers, cfg_path=None, duration_s=120, replay_path=None, secure=False, clients=None):
         self.node = node
         self.servers = servers
         self.cfg_path = cfg_path
@@ -131,7 +130,7 @@ class KeeperBench:
         self.secure = bool(secure)
         self.clients = clients
 
-    def _bench_cmd(self) -> str:
+    def _bench_cmd(self):
         if has_bin(self.node, "keeper-bench"):
             return "keeper-bench"
         if has_bin(self.node, "clickhouse"):
@@ -139,7 +138,7 @@ class KeeperBench:
             return "clickhouse keeper-bench"
         raise AssertionError("keeper-bench tool not found on node")
 
-    def run(self) -> dict:
+    def run(self):
         cfg_text = ""
         clients = 64
         try:

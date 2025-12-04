@@ -1,6 +1,6 @@
 import time, pathlib, pytest, json, uuid, yaml, copy
 import os, shutil
-from ..faults.base import apply_step as apply_step_dispatcher
+from ..faults import apply_step as apply_step_dispatcher
 from ..workloads.keeper_bench import KeeperBench
 from ..workloads.adapter import servers_arg
 from ..framework.io.probes import is_leader, mntr, prom_metrics, ch_metrics, ch_async_metrics
@@ -12,6 +12,7 @@ from ..framework.core.preflight import ensure_environment
 from ..framework.fuzz import generate_fuzz_scenario
 from ..framework.core.registry import fault_registry
 from ..framework.fuzz import _EXCLUDE as _FUZZ_EXCLUDE
+from ..framework.core.settings import parse_bool
 
 WORKDIR = pathlib.Path(__file__).parents[2]
 
@@ -196,12 +197,6 @@ def test_scenario(scenario, cluster_factory, request, run_meta):
         uses_dm = any((f.get("kind") in ("dm_delay","dm_error")) for f in fs_effective)
         if uses_dm:
             os.environ.setdefault("KEEPER_PRIVILEGED", "1")
-            os.environ.setdefault("KEEPER_HOST_AUTO_PROVISION", "1")
-        # Relax log gate for known transient errors during chaos if not provided by env
-        os.environ.setdefault(
-            "KEEPER_LOG_ALLOW",
-            "failed to read rpc header.*End of file|DNS error|Not found address of host|Net Exception: Socket is not connected|CANNOT_READ_ALL_DATA|Cannot read all data|Unknown table.*system\\.trace_log|Unknown table expression identifier 'system\\.trace_log'"
-        )
     except Exception:
         pass
     # compute run_id early for reproducible artifact paths
@@ -230,10 +225,7 @@ def test_scenario(scenario, cluster_factory, request, run_meta):
             ctx["faults_mode"] = request.config.getoption("--faults")
         except Exception:
             ctx["faults_mode"] = ctx.get("faults_mode", "on")
-        try:
-            ctx["log_allow"] = request.config.getoption("--log-allow") or ""
-        except Exception:
-            ctx["log_allow"] = ctx.get("log_allow", "")
+        # removed unused log_allow plumbing
         # propagate seed if provided
         try:
             ctx["seed"] = int(request.config.getoption("--seed") or 0)
@@ -247,7 +239,7 @@ def test_scenario(scenario, cluster_factory, request, run_meta):
             sampler.start()
         for step in scenario.get("pre", []): _apply_step(step, nodes, leader, ctx)
         kb=None
-        if faults_mode != "random" and "workload" in scenario:
+        if faults_mode != "random" and "workload" in scenario and not parse_bool(os.environ.get("KEEPER_DISABLE_WORKLOAD")):
             wl=scenario["workload"]
             # Environment overrides for workload paths and bench clients
             try:
@@ -342,7 +334,7 @@ def test_scenario(scenario, cluster_factory, request, run_meta):
         # Optional cleanup of generated artifacts if run succeeded
         try:
             failed = getattr(request.node, "keeper_failed", False)
-            clean = os.environ.get("KEEPER_CLEAN_ARTIFACTS", "").strip().lower() in ("1","true","yes","on")
+            clean = parse_bool(os.environ.get("KEEPER_CLEAN_ARTIFACTS"))
             if clean and not failed:
                 try:
                     inst_dir = pathlib.Path(getattr(cluster, "instances_dir", ""))

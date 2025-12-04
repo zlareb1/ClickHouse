@@ -43,7 +43,7 @@ def netem(node, delay_ms=0, jitter_ms=0, loss_pct=0, reorder=None, duplicate=Non
 
 
 @contextmanager
-def tbf(node, rate: str = "10mbit"):
+def tbf(node, rate="10mbit"):
     applied = False
     try:
         try:
@@ -324,7 +324,7 @@ def dns_blackhole(node):
             pass
 
 
-def _tcp_connect_ok(node, ip: str, port: int, timeout_s: int = 1) -> bool:
+def _tcp_connect_ok(node, ip, port, timeout_s=1):
     try:
         r = sh(node, f"timeout {int(timeout_s)} bash -c '</dev/tcp/{ip}/{int(port)}' >/dev/null 2>&1; echo $?")
         return str(r.get("out", " ")).strip().endswith("0")

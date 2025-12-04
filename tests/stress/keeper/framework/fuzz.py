@@ -1,5 +1,4 @@
 import os, random
-from typing import Any, Dict, List, Optional
 from .core.scenario_builder import ScenarioBuilder
 from .core.registry import fault_registry
 
@@ -13,7 +12,7 @@ _EXCLUDE = {
     "nbank_seed", "nbank_transfers",
 }
 
-def _fault_candidates() -> List[str]:
+def _fault_candidates():
     if isinstance(fault_registry, dict) and fault_registry:
         return sorted([k for k in fault_registry.keys() if k not in _EXCLUDE])
     # fallback static list
@@ -24,18 +23,18 @@ def _fault_candidates() -> List[str]:
     ]
 
 
-def _rand_targets(rnd: random.Random, names: List[str]) -> Any:
+def _rand_targets(rnd, names):
     k = rnd.choice(["leader", "followers", "all", "one"])
     if k == "one":
         return [rnd.choice(names)]
     return k
 
 
-def _choose_weighted(rnd: random.Random, weights: Dict[str, int]) -> str:
+def _choose_weighted(rnd, weights):
     kinds = []
     wts = []
     for k in _fault_candidates():
-        w = int(weights.get(k, 1))
+        w = int((weights or {}).get(k, 1))
         if w > 0:
             kinds.append(k); wts.append(w)
     if not kinds:
@@ -50,9 +49,9 @@ def _choose_weighted(rnd: random.Random, weights: Dict[str, int]) -> str:
             return k
     return kinds[-1]
 
-def _rand_fault(rnd: random.Random, node_names: List[str], weights: Optional[Dict[str, int]] = None, dur_min: int = 15, dur_max: int = 120) -> Dict[str, Any]:
+def _rand_fault(rnd, node_names, weights=None, dur_min=15, dur_max=120):
     kind = _choose_weighted(rnd, weights or {})
-    step: Dict[str, Any] = {"kind": kind}
+    step = {"kind": kind}
     step["on"] = _rand_targets(rnd, node_names)
     # parameters by kind
     if kind == "netem":
@@ -95,7 +94,7 @@ def _rand_fault(rnd: random.Random, node_names: List[str], weights: Optional[Dic
     return step
 
 
-def generate_fuzz_scenario(seed: int, steps: int, duration_s: int, weights: Optional[Dict[str, int]] = None, dur_min: Optional[int] = None, dur_max: Optional[int] = None) -> Dict[str, Any]:
+def generate_fuzz_scenario(seed, steps, duration_s, weights=None, dur_min=None, dur_max=None):
     rnd = random.Random(seed)
     sb = ScenarioBuilder("FUZZ-01", f"Fuzz chaos seed={seed}", topology=3)
     sb.set_workload_config("workloads/prod_mix.yaml", duration=duration_s)

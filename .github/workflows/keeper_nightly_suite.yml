@@ -24,8 +24,7 @@ jobs:
       # Shard by scenario id hashing (handled by loader)
       KEEPER_TOTAL_SHARDS: 2
       KEEPER_SHARD_INDEX: ${{ matrix.shard }}
-      # Strict mode: no skips, fail on setup errors
-      KEEPER_STRICT: 1
+      # Strict mode is always enforced by the framework
       # Default scenario files
       KEEPER_SCENARIO_FILE: all
       # Control and chaos knobs (hosted-friendly)
@@ -33,7 +32,6 @@ jobs:
       KEEPER_ENABLE_CONTROL: 1
       KEEPER_RANDOM_FAULTS_COUNT: 2
       KEEPER_SEEDS: 1,2
-      KEEPER_STRICT_FAULTS: 0
       KEEPER_RANDOM_FAULTS_EXCLUDE: dm_delay,dm_error
       
       # Optional metrics sink
@@ -41,6 +39,8 @@ jobs:
       KEEPER_METRICS_CLICKHOUSE_USER: ${{ secrets.KEEPER_METRICS_CLICKHOUSE_USER }}
       KEEPER_METRICS_CLICKHOUSE_PASSWORD: ${{ secrets.KEEPER_METRICS_CLICKHOUSE_PASSWORD }}
       KEEPER_METRICS_DB: keeper_stress_tests
+      # Bench tool URL (downloaded inside containers if keeper-bench is missing)
+      KEEPER_BENCH_URL: ${{ secrets.KEEPER_BENCH_URL }}
       # Commit SHA for reporting
       COMMIT_SHA: ${{ github.sha }}
       JOB_NAME: keeper-nightly-suite
