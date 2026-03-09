@@ -406,7 +406,7 @@ ProcessedManifestFileEntryPtr ManifestFileIterator::processRow(size_t row_index)
     {
         throw Exception(
             ErrorCodes::ICEBERG_SPECIFICATION_VIOLATION,
-            "Cannot read Iceberg table: manifest file '{}' has an EXISTING entry with no snapshot_id",
+            "Cannot read Iceberg table: manifest file '{}' has an EXISTING entry with null snapshot_id, cannot determine write file schema",
             manifest_file_name);
     }
     else
