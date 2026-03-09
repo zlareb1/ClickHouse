@@ -21,7 +21,6 @@ namespace Setting
     extern const SettingsBool insert_deduplicate;
     extern const SettingsDeduplicateInsertMode deduplicate_insert;
     extern const SettingsDeduplicateInsertSelectMode deduplicate_insert_select;
-    extern const SettingsString insert_deduplication_token;
 }
 
 bool isDeduplicationEnabledForInsert(bool is_async_insert, const Settings & settings)
@@ -69,20 +68,6 @@ bool isDeduplicationEnabledForInsertSelect(bool select_query_sorted, const Setti
         }
         case DeduplicateInsertSelectMode::ENABLE_WHEN_POSSIBLE:
         {
-            /// If an explicit deduplication token is provided, enable deduplication regardless
-            /// of SELECT stability. The user's token serves as the idempotency key, so they
-            /// are explicitly opting into idempotent INSERT SELECT behavior (e.g., for safe retries).
-            bool has_user_token = !settings[Setting::insert_deduplication_token].value.empty();
-            if (has_user_token)
-            {
-                if (logger && !select_query_sorted && isDeduplicationEnabledForInsert(false, settings))
-                    LOG_INFO(logger, "INSERT SELECT deduplication is enabled because insert_deduplication_token is explicitly set, "
-                        "even though SELECT is not fully sorted (ORDER BY ALL). "
-                        "Note: if the SELECT returns rows in different order between retries, "
-                        "only blocks that hash to the same deduplication token will be deduplicated.");
-                return isDeduplicationEnabledForInsert(false, settings);
-            }
-
             if (logger && !select_query_sorted && isDeduplicationEnabledForInsert(false, settings))
                 LOG_INFO(logger, "INSERT SELECT deduplication is disabled because SELECT is not stable");
 
