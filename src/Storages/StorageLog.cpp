@@ -28,6 +28,7 @@
 #include <DataTypes/DataTypeLowCardinality.h>
 #include <DataTypes/DataTypeString.h>
 #include <DataTypes/NestedUtils.h>
+#include <DataTypes/TypeTree.h>
 
 #include <Interpreters/Context.h>
 #include <Processors/ISource.h>
@@ -731,8 +732,7 @@ namespace
                 if (isVariant(type))
                     throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Engine {} doesn't support Variant data type", storage_name);
             };
-            callback(*column.type);
-            column.type->forEachChild(callback);
+            forEachInTypeTree(*column.type, callback);
         }
     }
 }
@@ -1450,6 +1450,8 @@ void registerStorageLog(StorageFactory & factory)
 
     auto create_fn = [](const StorageFactory::Arguments & args)
     {
+        checkStorageSettingNames(args);
+
         if (!args.engine_args.empty())
             throw Exception(ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH, "Engine {} doesn't support any arguments ({} given)",
                 args.engine_name, args.engine_args.size());
